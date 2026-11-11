@@ -1927,7 +1927,7 @@ function saveLocalBackup(row){
 const V9_DB_NAME="meera_production_test_v9_queue";
 const V9_DB_VERSION=1;
 const V9_LEGACY_PREFIX="meera_test_pending_v1_";
-const V9_FINAL_STATES=new Set(["SAVED","DUPLICATE"]);
+const V9_FINAL_STATES=new Set(["SAVED","DUPLICATE","ON_SERVER"]);
 const V9_RECHECK_MS=15000;
 const V9_RETRY_GRACE_MS=90000;
 const V9_MAX_POST_ATTEMPTS=3;
@@ -2130,14 +2130,14 @@ function v9ObserveQueuePanel(){
     check();
   }
 }
-function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
+function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
 function v9StatusClass(state){return state==="SAVED"?"ok":state==="DUPLICATE"||state==="REVIEW_REQUIRED"?"err":"info"}
 async function v9RefreshUi(){
   if(!currentUser||!v9Db)return;
   const owner=v9Owner(),rows=await v9GetAll(owner);
   if(v9Owner()!==owner)return;
   v9KnownBoxes=new Set(rows.map(r=>r.box));
-  const waiting=rows.filter(v9IsActive),verified=rows.filter(r=>r.state==="SAVED").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
+  const waiting=rows.filter(v9IsActive),verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
   v9LastCount=waiting.length;
   $("v9QueuedCount").textContent=waiting.length;
   $("v9SavedCount").textContent=verified;
@@ -2209,6 +2209,49 @@ async function v9CheckStatus(row){
   }
   return state;
 }
+// Read-only server reconciliation for an old or manually completed box.
+// This endpoint performs an exact box lookup ONLY for an unresolved local item,
+// not for every fresh save. Never infer success from a network response alone.
+async function v9CheckServerBox(row){
+  if(!currentUser||!sessionVerified)throw new Error("Online login required for server box reconciliation");
+  const d=await jsonp(buildUrl("meeraQueueBoxStatus",{
+    token:sessionToken,box:row.box,machine:String(row.payload.machine),requestId:row.requestId
+  }),20000);
+  if(!d||d.ok!==true)throw new Error(d&&d.error||"Server box verification failed");
+  const status=String(d.status||"").trim().toUpperCase();
+  if(!["NOT_FOUND","EXISTS_SAME_REQUEST","EXISTS_OTHER_REQUEST","REVIEW_REQUIRED"].includes(status))
+    throw new Error("Unexpected server box status: "+status);
+  if(status!=="NOT_FOUND" && String(d.box||"").toUpperCase()!==String(row.box||"").toUpperCase())
+    throw new Error("Server box mismatch; preserve local entry");
+  return status;
+}
+async function v9ResolveExistingBox(row){
+  const state=await v9CheckServerBox(row);
+  if(state==="EXISTS_OTHER_REQUEST"){
+    await v9Change(row.requestId,{
+      state:"ON_SERVER",verifiedAt:new Date().toISOString(),nextCheckAt:0,
+      lastError:"Box already exists in PRODUCTION DATA (manual/other Request ID). No duplicate sent. Local payload retained in audit."
+    });
+    return true;
+  }
+  if(state==="EXISTS_SAME_REQUEST"){
+    const check=await v9CheckStatus(row);
+    if(check==="CONFIRMED")return await v9ApplyStatus(row,check);
+    await v9Change(row.requestId,{
+      state:"REVIEW_REQUIRED",nextCheckAt:0,
+      lastError:"Production row exists for this Request ID but backup verification is incomplete ("+check+"). No automatic re-send."
+    });
+    return true;
+  }
+  if(state==="REVIEW_REQUIRED"){
+    await v9Change(row.requestId,{
+      state:"REVIEW_REQUIRED",nextCheckAt:0,
+      lastError:"Multiple matching boxes found in PRODUCTION DATA. Admin must review; no automatic re-send."
+    });
+    return true;
+  }
+  return false;
+}
 async function v9ApplyStatus(row,status){
   if(status==="CONFIRMED"){
     await v9Change(row.requestId,{state:"SAVED",verifiedAt:new Date().toISOString(),nextCheckAt:0,lastError:""});
@@ -2250,6 +2293,9 @@ async function v9Process(row){
     // Always verify first for an old/in-flight Request ID. First fresh
     // attempt can POST directly because it has never been transmitted.
     if(row.attempts>0){
+      // A manual Sheet repair may leave the old Request ID absent from the
+      // FAST-15 server index. Check the Box itself BEFORE retrying any POST.
+      if(await v9ResolveExistingBox(row))return;
       const status=await v9CheckStatus(row);
       if(await v9ApplyStatus(row,status))return;
       row=await v9Get(row.requestId);
@@ -2313,6 +2359,11 @@ async function v9CheckOnly(id){
   if(!await v9Lease()){showStatus("formStatus","Another tab is syncing. Try Check Only in a moment.","info");return}
   v9WorkerBusy=true;
   try{
+    if(await v9ResolveExistingBox(row)){
+      await v9RefreshUi();
+      showStatus("formStatus","✓ "+row.box+" already exists in PRODUCTION DATA. No duplicate sent; local audit kept.","ok");
+      return;
+    }
     const status=await v9CheckStatus(row);
     if(status==="NOT_FOUND" && !row.attempts){showStatus("formStatus","NOT SENT: "+row.box+" is still queued locally. No POST was sent by this check.","info")}
     await v9ApplyStatus(row,status);await v9RefreshUi();
@@ -2398,31 +2449,17 @@ async function saveEntry(event){
   const machineText=$("machine").value||$("machineSearch").value.replace(/[^0-9]/g,"");const machine=Number(machineText);
   if(!allowedMachines.includes(machine)){showStatus("formStatus","Select one of your assigned machines before saving.","err");return}
   const selectedRollType=rollTypeCode($("rollType").value),allowedRollTypes=effectiveRollTypes(machine);
-  if(!selectedRollType||!allowedRollTypes.includes(selectedRollType)){
-    showStatus("formStatus",!selectedRollType?"Select a Roll Type for this box before saving. Nothing was queued.":"Selected Roll Type is not permitted for this machine. Nothing was queued.","err");
-    if(!$("rollType").disabled)$("rollType").focus();
-    return;
-  }
   const productText=$("prodSearch").value.trim(),selectedProduct=$("selectedProduct").value.trim();
-  if(!planningLoaded&&!v12MasterMode){showStatus("formStatus","Production Planning is not loaded yet. Product selection is disabled.","err");return}
-  if(v12MasterMode&&!v12MasterOnline){showStatus("formStatus","Master Data has not been verified online. Nothing was queued.","err");return}
-  if(!selectedProduct||!productText||normaliseProductKey(selectedProduct)!==normaliseProductKey(productText)){
-    showStatus("formStatus","Select a product from the assigned product list before saving.","err");return;
-  }
   let productRecord=uniqueProducts().find(p=>normaliseProductKey(p.name)===normaliseProductKey(selectedProduct));
   if(!productRecord){productRecord={name:selectedProduct,yarn:$("yarnCode").value||""}}
-  if(!(v12MasterMode?v12IsMasterProduct(productRecord.name):isProductAssignedToMachine(productRecord.name,machine))){
-    showStatus("formStatus","This product is not assigned to the selected machine.","err");return;
-  }
-  const product=productRecord.name;
+  // Allow manual product values; backend flags mismatches for correction.
+  const product=productText||productRecord.name||selectedProduct||'';
   const digits=boxDigits($("box").value);if(!digits){showStatus("formStatus","Enter the numeric box number.","err");return}
   const finalBox=getBoxPrefix()+digits;
   const rollW=round3(num($("rollType").value,.38)),rolls=num($("rollCount").value),gross=round3(num($("grossWeight").value)),tare=round3(rollW*rolls),net=round3(Math.max(0,gross-tare));
-  if(!Number.isInteger(rolls)||rolls<=0||gross<=0||net<=0){showStatus("formStatus","Check rolls and weight: rolls, gross and net must be positive.","err");return}
-  const payload={action:"saveEntry",token:sessionToken,date:$("date").value,box:finalBox,machine:String(machine),unit:unitForMachine(machine),shift:$("shift").value,productName:product,productSource:v12MasterMode?"MASTER_ADD":"PLANNING",yarnCode:productRecord.yarn||"",rollTypeCode:selectedRollType,rollType:rollW.toFixed(3),rollCount:String(rolls),grossW:gross.toFixed(3),tapeW:tare.toFixed(3),netW:net.toFixed(3),timestamp:new Date().toISOString()};
-  if(!/^[AB][0-9]+$/.test(finalBox)||finalBox[0] !== (machine<=74?"A":"B")){
-    showStatus("formStatus","TEST server requires A boxes for machines 1–74 and B boxes for machines 75–111. No data sent.","err");return;
-  }
+  // Imperfect weights are sent as entered and marked Needs Review by backend.
+
+  const payload={action:"saveEntry",token:sessionToken,date:$("date").value,box:finalBox,machine:String(machine),unit:unitForMachine(machine),shift:$("shift").value,productName:product,productSource:v12MasterMode?"MASTER_ADD":"PLANNING",yarnCode:productRecord.yarn||"",rollTypeCode:selectedRollType,rollType:selectedRollType ? rollW.toFixed(3) : '',rollCount:$("rollCount").value,grossW:$("grossWeight").value,tapeW:$("tareWeight").value,netW:$("netWeight").value,timestamp:new Date().toISOString()};
   if (v9LocalBusy) return;
   const requestId = reliableId();
   payload.requestId = requestId;
