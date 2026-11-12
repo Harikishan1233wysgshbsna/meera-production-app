@@ -2711,13 +2711,21 @@ async function meeraRecoverySyncAll(){
       const first=await meeraRecoveryVerifyBatch(batch);
       confirmed+=first.confirmed;
       const remaining=[];
-      for(const r of batch){const x=(await meeraRecoveryTx('readonly',(s,set)=>{s.get(r.key).onsuccess=e=>set(e.target.result)}));if(x.verification==='NOT_FOUND' || x.verification==='BACKUP_PENDING')remaining.push(r)}
+      for(const r of batch){const x=(await meeraRecoveryTx('readonly',(s,set)=>{s.get(r.key).onsuccess=e=>set(e.target.result)}));if(x.verification==='NOT_FOUND')remaining.push(r)}
       if(remaining.length){
         meeraRecoverySay('Uploading batch '+(Math.floor(index/25)+1)+' of '+Math.ceil(pending.length/25)+' ('+remaining.length+' entries)…');
-        // The POST is opaque: a successful fetch is NOT a confirmed save.
+        // No blocking verification polls after upload. A no-cors POST is NOT a save confirmation.
+        // Preserve each original payload and request ID in durable recovery storage.
+        let transportError='';
         try{await apiPost({action:'bulkSyncOldEntries',token:sessionToken,entries:remaining.map(r=>({owner:r.owner,requestId:r.requestId,box:r.box,state:r.state,payload:r.payload}))})}
-        catch(err){meeraRecoverySay('POST uncertain: '+err.message+' — verifying server before further action.');}
-        const post=await meeraRecoveryVerifyBatch(remaining,true);confirmed+=post.confirmed;
+        catch(err){transportError=String(err&&err.message||err)}
+        const sentAt=new Date().toISOString();
+        for(const r of remaining){
+          await meeraRecoveryPut({...r,verification:'AWAITING_CONFIRMATION',
+            lastError:transportError||'Upload attempted; server confirmation will be checked on next Sync All. Keep original backup.',
+            checkedAt:sentAt});
+        }
+        if(transportError)meeraRecoverySay('Upload uncertain: '+transportError+'. Original records retained for later verification.');
       }
       done+=batch.length;
       const seconds=Math.max(.001,(performance.now()-started)/1000);
