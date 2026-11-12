@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>MEERA PRODUCTION — V102 MOBILE + SECURE BACKUP</title>
+<title>MEERA PRODUCTION — V103.3 BULK RECOVERY</title>
 <meta name="theme-color" content="#0b5cff">
-<meta name="meera-build" content="V102-MOBILE-LOCKED-BACKUP-DAILY-UNIT">
+<meta name="meera-build" content="V103.3-OLD-BACKUP-BULK-RECOVERY">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Meera Production">
@@ -883,6 +883,14 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
           <button type="button" class="btn btn-secondary" id="v9Export">🔒 Download Protected Backup</button>
           <button type="button" class="btn btn-secondary" id="v9ImportButton">⬆ Import Backup</button>
           <input id="v9ImportFile" type="file" accept="application/json,.json,text/html,.html" style="display:none">
+        <div class="v9-actions" id="meeraRecoveryActions" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+          <button type="button" class="btn btn-secondary" id="meeraRecoverImport">📥 Import OLD Backup for Recovery</button>
+          <input id="meeraRecoverFile" type="file" accept=".html,.htm,.json,text/html,application/json" style="display:none">
+          <button type="button" class="btn btn-primary" id="meeraRecoverSync">☁ Sync ALL Old Entries</button>
+          <button type="button" class="btn btn-secondary" id="meeraRecoverExport">⬇ Export Recovery Report</button>
+        </div>
+        <div id="meeraRecoverStatus" role="status" aria-live="polite" style="padding:10px;border:1px solid #bfcae4;border-radius:10px;margin:8px 0;white-space:pre-wrap;font-size:13px">Recovery: Log in, import your old backup, then Sync All. A verified server status is required; uploading alone is not confirmation.</div>
+        <p class="v9-hint">Recovery reads your own phone backup; all statuses including SAVED / DUPLICATE are eligible. Existing Request IDs will not be inserted twice. Keep your original backup. The recovery panel uses separate IndexedDB storage and does not erase the normal queue.</p>
         </div>
         <div class="table-wrap v9-queue-table"><table><thead><tr><th>Box</th><th>Status</th><th>Created (UTC)</th><th>ID end</th><th>Action</th></tr></thead>
           <tbody id="v9QueueBody"><tr><td colspan="5">Open the app and log in to view queue.</td></tr></tbody></table></div>
@@ -2202,6 +2210,7 @@ async function v9CheckStatus(row){
   }),16000);
   if(!data||data.ok!==true)throw new Error(data&&data.error||"Verification endpoint error");
   const state=String(data.status||"").trim().toUpperCase();
+  if(state==="BACKUP_REPAIR_REQUIRED")return "REVIEW_REQUIRED";
   if(!["CONFIRMED","DUPLICATE_BOX","REVIEW_REQUIRED","PENDING","NOT_FOUND"].includes(state))throw new Error("Unexpected response: "+state);
   if(state==="CONFIRMED"||state==="DUPLICATE_BOX"){
     if(String(data.requestId||"")!==row.requestId||String(data.box||"").toUpperCase()!==row.box)
@@ -2571,6 +2580,165 @@ function exportCSV(){
   const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="production_data.csv";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);
 }
 
+/* ===== MEERA V103.3 — Independent old-backup recovery, no normal queue mutation ===== */
+const MEERA_RECOVERY_DB='meera_v1033_recovery_v1';
+let meeraRecoveryBusy=false, meeraRecoveryDbPromise=null;
+function meeraRecoveryDb(){
+  if(meeraRecoveryDbPromise)return meeraRecoveryDbPromise;
+  meeraRecoveryDbPromise=new Promise((resolve,reject)=>{
+    const req=indexedDB.open(MEERA_RECOVERY_DB,1);
+    req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('entries'))req.result.createObjectStore('entries',{keyPath:'key'})};
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error||Error('Recovery storage unavailable'));
+    req.onblocked=()=>reject(Error('Close other tabs and retry recovery storage'));
+  }).catch(e=>{meeraRecoveryDbPromise=null;throw e});
+  return meeraRecoveryDbPromise;
+}
+async function meeraRecoveryTx(mode,operation){
+  const db=await meeraRecoveryDb();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('entries',mode),store=tx.objectStore('entries');
+    let value;
+    tx.oncomplete=()=>resolve(value);
+    tx.onerror=()=>reject(tx.error||Error('Recovery storage failed'));
+    tx.onabort=()=>reject(tx.error||Error('Recovery storage aborted'));
+    try{operation(store,x=>{value=x})}catch(e){tx.abort();reject(e)}
+  });
+}
+const meeraRecoveryAll=()=>meeraRecoveryTx('readonly',(s,set)=>{s.getAll().onsuccess=e=>set(e.target.result||[])});
+const meeraRecoveryPut=row=>meeraRecoveryTx('readwrite',(s)=>s.put(row));
+function meeraRecoverySay(msg){const el=document.getElementById('meeraRecoverStatus');if(el)el.textContent=msg}
+function meeraRecoveryAssertLogin(){if(!currentUser||!sessionToken||!sessionVerified)throw Error('Log in ONLINE before recovery');if(!window.indexedDB)throw Error('IndexedDB is unavailable on this browser')}
+function meeraRecoveryEntry(input){
+  const p=input.payload||input;
+  const owner=String(input.owner||p.owner||p.enteredBy||'').trim().toLowerCase();
+  const box=String(input.box||p.box||'').trim().toUpperCase();
+  const requestId=String(input.requestId||p.requestId||'').trim();
+  if(!owner||owner!==v9Owner())throw Error('Backup belongs to a different user: '+owner);
+  if(!box||!requestId||!p||!Number(p.machine||p.machineNo))throw Error('Backup entry missing Box, Request ID or machine');
+  if(!/^[A-Za-z0-9_-]{8,100}$/.test(requestId))throw Error('Invalid Request ID in backup');
+  if(p.requestId && String(p.requestId)!==requestId)throw Error('Backup Request ID mismatch');
+  if(p.box && String(p.box).trim().toUpperCase()!==box)throw Error('Backup Box mismatch');
+  const payload={...p};delete payload.token;
+  return {key:owner+'|'+requestId,owner,box,requestId,state:String(input.state||'UNKNOWN'),payload,verification:'READY',lastError:'',createdAt:input.createdAt||new Date().toISOString()};
+}
+async function meeraRecoveryReadArchive(file){
+  const raw=await file.text();let data;
+  if(/\.html?$/i.test(file.name)){
+    const match=raw.match(/<script id="meera-secure-payload" type="application\/json">([\s\S]*?)<\/script>/i);
+    if(!match)throw Error('Not a recognized MEERA locked HTML backup');
+    const pin=prompt('Enter backup PIN to import:');if(pin===null)return null;
+    data=await v102DecryptArchive(JSON.parse(match[1]),pin);
+  }else{
+    data=JSON.parse(raw);
+    if(data.format==='MEERA_LOCKED_BACKUP_V102'){
+      const pin=prompt('Enter backup PIN to import:');if(pin===null)return null;
+      data=await v102DecryptArchive(data,pin);
+    }
+  }
+  if(!data||data.format!=='MEERA_V9_LOCAL_BACKUP'||!Array.isArray(data.entries)||data.entries.length>5000)throw Error('Unsupported backup format or excessive entries');
+  if(String(data.owner||'').toLowerCase()!==v9Owner())throw Error('This backup belongs to another user; log into that account');
+  return data.entries;
+}
+async function meeraRecoveryImport(file){
+  meeraRecoveryAssertLogin();if(meeraRecoveryBusy)throw Error('Recovery is already running');
+  const entries=await meeraRecoveryReadArchive(file);if(!entries)return;
+  const validated=entries.map(meeraRecoveryEntry); // validate entire file first
+  const old=await meeraRecoveryAll(),byKey=new Map(old.map(r=>[r.key,r]));
+  let added=0;
+  for(const item of validated){
+    if(byKey.has(item.key))continue;
+    await meeraRecoveryPut(item);byKey.set(item.key,item);added++;
+  }
+  meeraRecoverySay('Imported '+added+' NEW records / '+entries.length+' in this backup. Stored on this browser separately from normal queue. Press Sync All while online.');
+}
+async function meeraRecoveryCombineLocal(){
+  const history=await v9GetAll(v9Owner()),existing=await meeraRecoveryAll();
+  const keys=new Set(existing.map(r=>r.key));let count=0;
+  for(const source of history){
+    let row;
+    try{row=meeraRecoveryEntry(source)}catch(e){continue} // corrupt legacy records stay untouched in original queue
+    if(keys.has(row.key))continue;
+    await meeraRecoveryPut(row);keys.add(row.key);count++;
+  }
+  return count;
+}
+async function meeraRecoveryStatus(ids){
+  if(!ids.length)return [];
+  // One authenticated JSONP GET for up to 25 Request IDs, not 25 individual GETs.
+  const res=await apiGet('bulkRecoveryStatus',{token:sessionToken,ids:ids.join(',')});
+  if(!res||!res.ok||!Array.isArray(res.results))throw Error(res&&res.error||'Bulk status API missing; Backend GET route must be deployed');
+  return res.results;
+}
+async function meeraRecoveryVerifyBatch(batch,waitForPost=false){
+  const found=new Map();
+  for(let attempt=0;attempt<(waitForPost?4:1);attempt++){
+    const statuses=await meeraRecoveryStatus(batch.map(r=>r.requestId));
+    for(const item of statuses)found.set(String(item.requestId),item);
+    if(batch.every(r=>{const v=found.get(r.requestId);return v&&v.status!=='NOT_FOUND'&&v.status!=='BACKUP_PENDING'}))break;
+    if(waitForPost && attempt<3)await new Promise(resolve=>setTimeout(resolve,2500));
+  }
+  let confirmed=0,unverified=0;
+  for(const row of batch){
+    const result=found.get(row.requestId)||{status:'UNVERIFIED'};
+    // Only verified same-owner, same-box Production AND CONFIRMED backup is fully recovered.
+    const match=String(result.box||'').toUpperCase()===row.box;
+    const verified=result.status==='CONFIRMED'&&match;
+    const updated={...row,verification:verified?'CONFIRMED':String(result.status||'UNVERIFIED'),
+      lastError:verified?'':(!match&&result.box?'Box mismatch: '+result.box:(result.error||'Not fully confirmed; do not erase backup')),
+      checkedAt:new Date().toISOString()};
+    await meeraRecoveryPut(updated);
+    if(verified)confirmed++;else unverified++;
+  }
+  return {confirmed,unverified};
+}
+async function meeraRecoverySyncAll(){
+  meeraRecoveryAssertLogin();
+  if(meeraRecoveryBusy)throw Error('Recovery already running');
+  meeraRecoveryBusy=true;
+  const button=document.getElementById('meeraRecoverSync');if(button)button.disabled=true;
+  try{
+    const added=await meeraRecoveryCombineLocal();
+    let all=(await meeraRecoveryAll()).filter(r=>r.owner===v9Owner());
+    if(!all.length){meeraRecoverySay('No entries available. Import a backup from this phone first.');return}
+    const pending=all.filter(r=>r.verification!=='CONFIRMED');
+    let done=0,confirmed=all.length-pending.length,unverified=0;
+    const started=performance.now();
+    meeraRecoverySay('Found '+all.length+' entries; '+confirmed+' previously confirmed; '+pending.length+' to check. Added '+added+' records from this browser queue.');
+    for(let index=0;index<pending.length;index+=25){
+      const batch=pending.slice(index,index+25);
+      // Check before POST to avoid resending recovered entries.
+      const first=await meeraRecoveryVerifyBatch(batch);
+      confirmed+=first.confirmed;
+      const remaining=[];
+      for(const r of batch){const x=(await meeraRecoveryTx('readonly',(s,set)=>{s.get(r.key).onsuccess=e=>set(e.target.result)}));if(x.verification!=='CONFIRMED' && x.verification==='NOT_FOUND')remaining.push(r)}
+      if(remaining.length){
+        meeraRecoverySay('Uploading batch '+(Math.floor(index/25)+1)+' of '+Math.ceil(pending.length/25)+' ('+remaining.length+' entries)…');
+        // The POST is opaque: a successful fetch is NOT a confirmed save.
+        try{await apiPost({action:'bulkSyncOldEntries',token:sessionToken,entries:remaining.map(r=>({owner:r.owner,requestId:r.requestId,box:r.box,state:r.state,payload:r.payload}))})}
+        catch(err){meeraRecoverySay('POST uncertain: '+err.message+' — verifying server before further action.');}
+        const post=await meeraRecoveryVerifyBatch(remaining,true);confirmed+=post.confirmed;
+      }
+      done+=batch.length;
+      const seconds=Math.max(.001,(performance.now()-started)/1000);
+      meeraRecoverySay('Checked '+done+'/'+pending.length+' pending records; confirmed now '+confirmed+'/'+all.length+'. Rate '+(done/seconds).toFixed(2)+' entries/sec checked (not a guaranteed save rate). Unconfirmed rows remain in recovery storage.');
+    }
+    const final=(await meeraRecoveryAll()).filter(r=>r.owner===v9Owner());
+    const count=final.filter(r=>r.verification==='CONFIRMED').length;
+    unverified=final.length-count;
+    meeraRecoverySay('Recovery finished checking '+final.length+' entries. VERIFIED IN BOTH SHEETS: '+count+'. Needs review / unconfirmed: '+unverified+'. Do NOT erase the original backup. Export Recovery Report for the details.');
+  }finally{meeraRecoveryBusy=false;if(button)button.disabled=false}
+}
+async function meeraRecoveryExportReport(){
+  meeraRecoveryAssertLogin();
+  const rows=(await meeraRecoveryAll()).filter(r=>r.owner===v9Owner());
+  const header=['REQUEST ID','BOX NUMBER','ORIGINAL STATE','RECOVERY STATUS','ERROR','CHECKED AT'];
+  const escapeCsv=x=>'"'+String(x==null?'':x).replace(/"/g,'""')+'"';
+  const csv=[header,...rows.map(r=>[r.requestId,r.box,r.state,r.verification,r.lastError,r.checkedAt||''])].map(r=>r.map(escapeCsv).join(',')).join('\r\n');
+  v102Download('MEERA_RECOVERY_REPORT_'+v9Owner()+'.csv',csv,'text/csv;charset=utf-8');
+}
+/* ===== End separate recovery module ===== */
+
 /* -------- Event wiring -------- */
 document.addEventListener("DOMContentLoaded",async()=>{
   $("todayLabel")?.remove(); // kept harmless for older saved copies
@@ -2583,6 +2751,11 @@ document.addEventListener("DOMContentLoaded",async()=>{
   $("v9Export").addEventListener("click",()=>v9Export().catch(e=>showStatus("formStatus",e.message,"err")));
   $("v9ImportButton").addEventListener("click",()=>$("v9ImportFile").click());
   $("v9ImportFile").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{await v9Import(f)}catch(x){showStatus("formStatus",x.message,"err")}e.target.value=""});
+  $("meeraRecoverImport").addEventListener("click",()=>$("meeraRecoverFile").click());
+  $("meeraRecoverFile").addEventListener("change",async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{await meeraRecoveryImport(f)}catch(x){meeraRecoverySay('Import failed: '+x.message)}});
+  $("meeraRecoverSync").addEventListener("click",()=>meeraRecoverySyncAll().catch(e=>meeraRecoverySay('Sync stopped: '+e.message+'. Original backup remains safe.')));
+  $("meeraRecoverExport").addEventListener("click",()=>meeraRecoveryExportReport().catch(e=>meeraRecoverySay('Report error: '+e.message)));
+
   $("v9QueueBody").addEventListener("click",e=>{const b=e.target.closest("button[data-v9-action='check']");if(b)v9CheckOnly(b.dataset.v9Id)});
   window.addEventListener("online",()=>v9Schedule(150));
   // Phone OS can suspend the browser. Resume when returning; upload while closed is NOT guaranteed.
