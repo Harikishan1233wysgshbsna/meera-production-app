@@ -2271,14 +2271,19 @@ async function v9ResolveExistingBox(row){
 }
 async function v9ApplyStatus(row,status){
   if(status==="CONFIRMED"){
-    await v9Change(row.requestId,{state:"SAVED",verifiedAt:new Date().toISOString(),nextCheckAt:0,lastError:""});
+    // After verified server save, release the full mobile payload. Keep only
+    // request-ID/box audit metadata; LIVE Production + Backup hold the entry.
+    await v9Change(row.requestId,{state:"SAVED",verifiedAt:new Date().toISOString(),nextCheckAt:0,lastError:"",
+      payload:{action:"saveEntry",requestId:row.requestId,box:row.box,machine:row.payload.machine,unit:row.payload.unit}});
     reliableLastConfirmed={box:row.box,unit:row.payload.unit,machine:row.payload.machine};
     const key=V9_LEGACY_PREFIX+row.owner;
     try{const old=JSON.parse(localStorage.getItem(key)||"null");if(old&&old.requestId===row.requestId)localStorage.removeItem(key)}catch(e){}
     return true;
   }
   if(status==="DUPLICATE_BOX"){
-    await v9Change(row.requestId,{state:"DUPLICATE",verifiedAt:new Date().toISOString(),nextCheckAt:0,lastError:"Box already exists with another Request ID; this attempt was rejected."});
+    // Server has not stored this Request ID. Never call this SAVED or purge its payload.
+    await v9Change(row.requestId,{state:"REVIEW_REQUIRED",nextCheckAt:0,
+      lastError:"Server rejected this Box as duplicate. Original payload PRESERVED. Apps Script must allow distinct Request IDs for review."});
     const key=V9_LEGACY_PREFIX+row.owner;
     try{const old=JSON.parse(localStorage.getItem(key)||"null");if(old&&old.requestId===row.requestId)localStorage.removeItem(key)}catch(e){}
     return true;
