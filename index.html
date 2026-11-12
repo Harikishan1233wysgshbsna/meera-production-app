@@ -923,13 +923,13 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
               <label for="box">Box Number *</label>
               <div class="box-input-row">
                 <span id="boxPrefixBadge" class="form-box-prefix">NO PREFIX</span>
-                <input type="text" id="box" required inputmode="numeric" placeholder="1234">
+                <input type="text" id="box" required readonly aria-readonly="true" inputmode="none" placeholder="Auto allocated" style="background:#e8edf4;font-weight:700;cursor:not-allowed">
               </div>
               <span id="boxPreview" class="sub">Final box number: 1234</span>
-              <div id="v12BoxStatus" class="v12-note">Next box is a local suggestion until server confirms it. Not reserved.</div>
+              <div id="v12BoxStatus" class="v12-note">Automatic Unit-wise Box: local + LIVE suggestion. Not reserved across phones until server allocation is implemented.</div>
               <div class="v12-note" id="v12LocalBoxDiagnostic" aria-live="polite">To check duplicate history, enter a Box Number and press Check local box.</div>
               <button type="button" id="v12CheckLocalBox" class="btn btn-secondary" style="margin-top:7px">🔎 Check local box history (read only)</button>
-              <span class="sub">Enter only the number. The assigned user prefix is added automatically.</span>
+              <span class="sub">🔒 Box number is generated automatically for the selected machine/unit. Manual editing is disabled.</span>
             </div>
             <div id="adminPrefixGroup" class="form-group admin-prefix-entry-group hidden">
               <label for="adminBoxPrefix">Admin Box Prefix</label>
@@ -1893,11 +1893,15 @@ async function v12CheckServerBox(machine){
     if(String(d.unit)!==unit||String(d.box)[0]!== (unit==="1"?"A":"B"))throw Error("Unit mismatch");
     const exact=String(d.box);
     v12BoxSource="SERVER SUGGESTION (not reserved)";
-    if(selectedMachineNumber()===m&&!window.__boxManual&&getBoxPrefix()===exact[0]){$("box").value=boxDigits(exact);updateBoxPreview()}
-    if(note)note.textContent="Server suggests "+exact+" • Not reserved; duplicate validation applies at save.";
+    if(selectedMachineNumber()===m&&!window.__boxManual&&getBoxPrefix()===exact[0]){
+      // Never move backwards below the next box already queued on this device.
+      $("box").value=Math.max(Number(boxDigits($("box").value))||101,Number(boxDigits(exact))||101,getNextBox(unit));
+      updateBoxPreview();
+    }
+    if(note)note.textContent="🔒 Auto Box • LIVE suggests "+exact+" • selected "+getBoxPrefix()+boxDigits($("box").value)+" (not yet reserved across phones).";
   }catch(e){
     v12BoxSource="LOCAL SUGGESTION (not reserved)";
-    if(note)note.textContent="⚠ Server box lookup unavailable. Shown number is a local suggestion only; verify before entering.";
+    if(note)note.textContent="⚠ LIVE Box lookup unavailable. Auto number is only a local suggestion; wait for LIVE before saving if multiple phones share a Unit.";
   }
 }
 function getNextBox(unit){
@@ -2502,9 +2506,19 @@ async function saveEntry(event){
   v9LocalBusy=true; v9SetButton();
   try {
     if (!v9StorageReady) throw new Error("IndexedDB backup is not ready. No request sent.");
-    // User does not manually check duplicates. Every valid submission has its own Request ID.
-    // Never discard a record because the Box number already exists locally.
-    // The server must independently allow differing Request IDs as Needs Review.
+    // Stop box duplicates on the FORM before the payload enters local queue.
+    // Same-unit cross-device uniqueness still requires a server-side atomic allocator.
+    const oldRows=await v9GetAll(v9Owner());
+    if(oldRows.some(r=>String(r.box||'').toUpperCase()===finalBox)){
+      $("box").value=Math.max(Number(digits)+1,getNextBox(unitForMachine(machine)));
+      updateBoxPreview();
+      throw new Error("BOX ALREADY USED on this phone: "+finalBox+". Next automatic box selected; check details and tap Save again.");
+    }
+    if(entries.some(r=>String(r.box||r.boxNumber||'').toUpperCase()===finalBox)){
+      $("box").value=Math.max(Number(digits)+1,getNextBox(unitForMachine(machine)));
+      updateBoxPreview();
+      throw new Error("BOX ALREADY EXISTS in loaded LIVE data: "+finalBox+". Next automatic box selected; check details and tap Save again.");
+    }
     await v9Insert(entry); // Wait for the durable transaction to finish.
     const stored = await v9Get(requestId);
     if(!stored || stored.requestId!==requestId || stored.box!==finalBox)
@@ -2840,7 +2854,7 @@ document.addEventListener("DOMContentLoaded",async()=>{
     el.textContent=match.length?box+" found in LOCAL IndexedDB: "+match.map(r=>r.state+" / Request ID …"+String(r.requestId).slice(-8)).join("; ")+". This is local history, not a live Sheet lookup. Do not clear pending records.":box+" not in this browser's local queue. Server may still reject a duplicate; inspect the server response.";
   });
   $("v12AddProduct").addEventListener("click",()=>v12SetMasterMode(true));$("v12BackPlanning").addEventListener("click",()=>v12SetMasterMode(false));
-  $("resetButton").addEventListener("click",resetForm);$("box").addEventListener("input",()=>{window.__boxManual=true;updateBoxPreview()});$("adminBoxPrefix").addEventListener("change",()=>{$("box").value=Math.max(101,getNextBox());updateBoxPreview()});$("rollType").addEventListener("change",calcWeight);$("rollCount").addEventListener("input",calcWeight);$("grossWeight").addEventListener("input",calcWeight);
+  $("resetButton").addEventListener("click",resetForm);$("box").addEventListener("input",()=>{updateBoxPreview()});$("adminBoxPrefix").addEventListener("change",()=>{$("box").value=Math.max(101,getNextBox());updateBoxPreview()});$("rollType").addEventListener("change",calcWeight);$("rollCount").addEventListener("input",calcWeight);$("grossWeight").addEventListener("input",calcWeight);
   $("machineSearch").addEventListener("input",filterMachineResults);$("machineSearch").addEventListener("focus",showMachineResults);$("machineSearch").addEventListener("blur",hideMachineResults);
   $("prodSearch").addEventListener("input",filterProductResults);$("prodSearch").addEventListener("focus",showProductResults);$("prodSearch").addEventListener("blur",hideProductResults);
   ["fFrom","fTo","fProd","fYarn","fSearch"].forEach(id=>$(id).addEventListener("input",renderEntryTables));$("clearFiltersButton").addEventListener("click",clearFilters);
