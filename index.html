@@ -2760,14 +2760,16 @@ async function meeraRecoveryExportReport(){
 }
 // Clears only the currently logged-in owner's browser records, NOT LIVE sheets.
 // The operator must first export and preserve a separate backup.
-async function meeraClearOldLocalData(){
+async function meeraClearOldLocalData(chatConfirmedOwner=null){
   meeraRecoveryAssertLogin();
   if(v9WorkerBusy||v9LocalBusy||meeraRecoveryBusy)throw Error('Sync or entry save is running. Try again when it stops.');
   if(!v9Db||!v9StorageReady)throw Error('Local queue storage is not ready.');
   const owner=v9Owner();
-  if(!confirm('PERMANENT LOCAL CLEAR for '+owner+' on THIS browser only. Your old entries may still be missing from LIVE. Confirm you have exported the backup to a different device. Continue?'))return 'Clear cancelled. No local entries deleted.';
-  const typed=prompt('To clear old browser records, type exactly: CLEAR '+owner);
-  if(typed!=='CLEAR '+owner){meeraRecoverySay('Clear cancelled. No records deleted.');return 'Clear cancelled. No local entries deleted.';}
+  if(chatConfirmedOwner!==owner){
+    if(!confirm('PERMANENT LOCAL CLEAR for '+owner+' on THIS browser only. Your old entries may still be missing from LIVE. Confirm you have exported the backup to a different device. Continue?'))return 'Clear cancelled. No local entries deleted.';
+    const typed=prompt('To clear old browser records, type exactly: CLEAR '+owner);
+    if(typed!=='CLEAR '+owner){meeraRecoverySay('Clear cancelled. No records deleted.');return 'Clear cancelled. No local entries deleted.';}
+  }
   if(!await v9Lease(false,owner))throw Error('Another browser tab is syncing. Close other tabs first.');
   v9WorkerBusy=true;
   const btn=document.getElementById('v9ClearOldLocal');
@@ -3265,6 +3267,7 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
  const byId=id=>document.getElementById(id);
  const root=byId('meeraAiRoot'), pane=byId('meeraAiChat'), messages=byId('meeraAiMessages');
  let busy=false,recognizer=null,voiceReplies=false,sourceFiles=[],lastAnswer='';
+ let clearAwaitingOwner=null;
  const isLoggedIn=()=>!byId('appShell').classList.contains('hidden')&&!!currentUser&&!!sessionToken;
  const isAdminAi=()=>!!currentUser&&String(currentUser.role||'').toLowerCase()==='admin';
  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -3343,16 +3346,28 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
  }
  async function sendAI(prompt){
    if(busy)return;const text=safeValue(prompt).trim();if(!text)return;
-   byId('meeraAiInput').value='';addMessage('user',text);
-   // Local, explicit operator command. Never send a destructive command to AI.
-   // Clear requires the existing two confirmations, and touches this user's browser only.
-   if(/^clear[\\s_-]+old[\\s_-]+(?:bro|browser|payload|data)$/i.test(text)){
-     try{
-       const result=await meeraClearOldLocalData();
-       addMessage('ai',result||'Clear cancelled. Old local entries were not deleted.','Local action');
-     }catch(error){
-       addMessage('ai','Clear not completed: '+String(error&&error.message||error),'Local action');
+   byId('meeraAiInput').value='';
+   // The chat reset requires its own second message. Never display or send its PIN to AI.
+   if(clearAwaitingOwner){
+     const expectedOwner=clearAwaitingOwner;
+     clearAwaitingOwner=null;
+     if(text==='8812' && sessionVerified && v9Owner()===expectedOwner){
+       addMessage('user','••••');
+       try{
+         const result=await meeraClearOldLocalData(expectedOwner);
+         addMessage('ai',result||'Local clear cancelled.','Local action');
+         await checkLocalQueue();
+       }catch(error){addMessage('ai','Clear failed: '+String(error&&error.message||error),'Local action');}
+     }else{
+       addMessage('ai','Clear cancelled: confirmation code or logged-in user did not match. No records deleted.','Local action');
      }
+     return;
+   }
+   addMessage('user',text);
+   if(/^clear[\\s_-]+old[\\s_-]+(?:bro|browser|payload|data)$/i.test(text)){
+     if(!sessionVerified||!currentUser){addMessage('ai','Log in online before clearing old local entries.');return;}
+     clearAwaitingOwner=v9Owner();
+     addMessage('ai','PERMANENT LOCAL CLEAR for '+clearAwaitingOwner+' on THIS browser only. Make sure all old entries are backed up outside this phone. LIVE Google Sheet will not change. Type 8812 and press Enter to confirm, or CANCEL to stop.','Local confirmation');
      return;
    }
    const local=await localReply(text);
