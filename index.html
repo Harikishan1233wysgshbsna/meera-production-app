@@ -930,6 +930,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
               <div class="v12-note" id="v12LocalBoxDiagnostic" aria-live="polite">To check duplicate history, enter a Box Number and press Check local box.</div>
               <button type="button" id="v12CheckLocalBox" class="btn btn-secondary" style="margin-top:7px">🔎 Check local box history (read only)</button>
               <span class="sub">🔒 Box number is generated automatically for the selected machine/unit. Manual editing is disabled.</span>
+              <span class="sub" style="color:#53637c">Workplace notice: the chosen production-entry fields and Save/Queue status may be shared with authorized admins after server connection. Passwords and other phone screens are never sent.</span>
             </div>
             <div id="adminPrefixGroup" class="form-group admin-prefix-entry-group hidden">
               <label for="adminBoxPrefix">Admin Box Prefix</label>
@@ -1125,6 +1126,18 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
       </div>
     </section>
     <section id="view-admin" class="view hidden">
+<div class="card" id="meeraAdminLiveMirror">
+ <h2>📡 Admin — Live User Entry Monitor</h2>
+ <p class="sub">Shows only PRODUCTION ENTRY fields and phone-reported queue records that reached the authenticated Apps Script. It cannot see unsent phone storage, passwords, other apps or the full phone screen. Requires MEERA_MONITOR_V1.gs backend deployment.</p>
+ <div class="form-grid">
+  <div class="form-group"><label for="meeraMonitorOperator">User</label><input id="meeraMonitorOperator" placeholder="All users" autocomplete="off"></div>
+  <div class="form-group"><label for="meeraMonitorStage">Entry state</label><select id="meeraMonitorStage"><option value="">All statuses</option><option value="DRAFT">Editing form</option><option value="QUEUED">Queued on phone</option><option value="SAVED">Phone reports confirmed</option><option value="REVIEW_REQUIRED">Review required</option></select></div>
+ </div>
+ <div class="btn-row"><button type="button" class="btn btn-primary" id="meeraMonitorRefresh">↻ Refresh User Monitor</button><button type="button" class="btn btn-secondary" id="meeraMonitorExport">⬇ Download Visible Records (JSON)</button></div>
+ <div id="meeraMonitorHealth" class="v12-note" role="status">Checking server monitor capability…</div>
+ <div id="meeraMonitorSummary" class="sub">No remote records loaded yet.</div>
+ <div class="table-wrap"><table><thead><tr><th>User</th><th>Unit / M/C</th><th>Box</th><th>Product</th><th>Rolls</th><th>Gross</th><th>State</th><th>Last seen</th></tr></thead><tbody id="meeraMonitorRows"><tr><td colspan="8">Backend connection required.</td></tr></tbody></table></div>
+</div>
 <div class="card" id="meeraAdminPendingMonitor"><h2>🔍 Admin Pending / Recovery Monitor</h2><p class="sub">Server-received and admin-imported reports only. A browser-local unsent queue cannot be seen remotely until reported. No automatic blind retries.</p><div class="form-grid"><div class="form-group"><label for="meeraUnitFilter">Unit</label><select id="meeraUnitFilter"><option value="">All Units</option><option value="1">Unit 1</option><option value="2">Unit 2</option></select></div><div class="form-group"><label for="meeraOperatorFilter">Operator</label><input id="meeraOperatorFilter" placeholder="All operators"></div></div><div class="btn-row"><button type="button" class="btn btn-secondary" onclick="meeraAdminRefresh()">↻ Refresh Server Pending</button></div><div id="meeraPendingRows" style="max-height:330px;overflow:auto;padding:8px 0" aria-live="polite">Refresh to load server data.</div></div>
 
       <div class="card v10-admin-root">
@@ -1440,7 +1453,7 @@ async function verifyQuickOpenSession(saved){
     $("adminTab").classList.toggle("hidden",!isAdmin());$("adminPrefixGroup").classList.toggle("hidden",!isAdmin());
     renderMachineResults($("machineSearch").value||"");setSessionConnectionState(true);reliableButton();
     loadEntries().finally(()=>{loadPlanningAssignments();loadMaster();if(isAdmin())loadUsers();});refreshQuickOpenButton();
-    v9OnLogin().catch(()=>{});
+    v9OnLogin().catch(()=>{});if(window.meeraMonitorStart)window.meeraMonitorStart();
   }catch(error){
     setSessionConnectionState(false,"Opened with your saved session. Server is unreachable, so this is read-only; shared entries can save after connection returns.");
   }
@@ -1464,7 +1477,7 @@ async function enterApp(token,user,verified=true){
   if(verified){
     setSessionConnectionState(true);reliableButton();
     loadEntries().finally(()=>{loadPlanningAssignments();loadMaster();if(isAdmin())loadUsers();});
-    v9OnLogin().catch(()=>{});
+    v9OnLogin().catch(()=>{});if(window.meeraMonitorStart)window.meeraMonitorStart();
   }else{
     // Quick Open is read-only and must not treat device-local planning data as
     // authoritative. Wait for the shared server planning data.
@@ -2532,6 +2545,9 @@ async function saveEntry(event){
     showStatus("formStatus","✓ QUEUED LOCALLY: "+finalBox+". NOT YET SAVED to Google Sheet. You can enter next box.","info");
     await v9RefreshUi();
     v9Schedule(50);
+    // Optional admin inbox report is never on the critical path of local Save.
+    // Disabled automatically until authenticated monitor backend is deployed.
+    if(window.meeraMonitorQueueReport)window.meeraMonitorQueueReport(entry);
   } catch(error) {
     showStatus("formStatus","NOT QUEUED — "+(error.message||"Storage failed")+". Keep these form details; do not re-enter blindly.","err");
   } finally {v9LocalBusy=false;v9SetButton();}
@@ -3476,6 +3492,123 @@ async function meeraAdminRefresh(){
  }catch(e){target.textContent='Could not load Pending Report: '+(e?.message||e)}
 }
 document.addEventListener('click',function(e){if(e.target?.closest?.('[data-view="admin"]'))setTimeout(meeraAdminRefresh,150)},true);
+</script>
+
+<script id="meera-user-admin-monitor-v1">
+/* Operator form mirror: non-blocking and AUTHENTICATED Apps Script only.
+   NEVER upload to GitHub, NEVER collect password/login/whole-screen data.
+   POST no-cors is unverified; only authenticated admin read shows received records. */
+(function(){
+ 'use strict';
+ let ready=false, started=false, lastDraftAt=0, draftTimer=null, sending=false, cursor=0;
+ let currentItems=[];
+ const $m=id=>document.getElementById(id);
+ const entryIds=new Set(['date','shift','machine','machineSearch','box','prodSearch','selectedProduct','rollType','rollCount','grossWeight','tareWeight','netWeight']);
+ const clean=(v,n=200)=>String(v==null?'':v).slice(0,n);
+ const online=()=>!!currentUser&&!!sessionToken&&!!sessionVerified;
+ const admin=()=>online()&&typeof isAdmin==='function'&&isAdmin();
+ function snapshot(){
+  const x=id=>$m(id)?$m(id).value:'';
+  const machine=x('machine')||clean(x('machineSearch')).replace(/[^0-9]/g,'');
+  const box=(typeof getBoxPrefix==='function'?getBoxPrefix():'')+(typeof boxDigits==='function'?boxDigits(x('box')):x('box'));
+  return {unit:typeof unitForMachine==='function'?unitForMachine(machine):'',
+   machine:clean(machine,10),box:clean(box,30),date:clean(x('date'),20),shift:clean(x('shift'),20),
+   product:clean(x('selectedProduct')||x('prodSearch')),yarn:clean(x('yarnCode')),rolls:clean(x('rollCount'),20),
+   gross:clean(x('grossWeight'),30),tare:clean(x('tareWeight'),30),net:clean(x('netWeight'),30)};
+ }
+ function fromEntry(e){
+  const p=e.payload||{};
+  return {requestId:clean(e.requestId,100),stage:clean(e.state,30),
+   box:clean(e.box,40),unit:clean(p.unit,5),machine:clean(p.machine,10),date:clean(p.date,20),
+   shift:clean(p.shift,20),product:clean(p.productName),yarn:clean(p.yarnCode),
+   rolls:clean(p.rollCount,20),gross:clean(p.grossW,30),tare:clean(p.tapeW,30),net:clean(p.netW,30)};
+ }
+ async function submit(items){
+  if(!online()||!ready||!Array.isArray(items)||!items.length)return;
+  // A monitoring failure MUST NOT block entry, queue sync or local save.
+  try{await apiPost({action:'meeraMonitorPush',token:sessionToken,items:items.slice(0,12)});}catch(_){}
+ }
+ window.meeraMonitorQueueReport=function(entry){
+  if(!ready||!online())return;
+  submit([fromEntry(entry)]).catch(()=>{});
+ };
+ function scheduleDraft(){
+  if(!ready||!online())return;
+  clearTimeout(draftTimer);
+  draftTimer=setTimeout(()=>{
+   if(!ready||!online()||Date.now()-lastDraftAt<20000)return;
+   lastDraftAt=Date.now();
+   submit([{stage:'DRAFT',...snapshot()}]).catch(()=>{});
+  },5500);
+ }
+ async function uploadLocalPending(){
+  if(!ready||!online()||sending||typeof v9GetAll!=='function')return;
+  sending=true;
+  try{
+   const owner=v9Owner(),rows=(await v9GetAll(owner)).filter(r=>!['SAVED','DUPLICATE','ON_SERVER'].includes(r.state));
+   if(!rows.length){cursor=0;return}
+   if(cursor>=rows.length)cursor=0;
+   const slice=rows.slice(cursor,cursor+10).map(fromEntry);
+   cursor+=slice.length;
+   if(slice.length)await submit(slice);
+  }catch(_){}finally{sending=false}
+ }
+ function statusLine(t){const e=$m('meeraMonitorHealth');if(e)e.textContent=t}
+ function render(items){
+  const t=$m('meeraMonitorRows');if(!t)return;t.replaceChildren();
+  const filter=clean($m('meeraMonitorOperator')?.value).trim().toLowerCase();
+  const state=clean($m('meeraMonitorStage')?.value).trim().toUpperCase();
+  const filtered=items.filter(r=>(!filter||clean(r.username).toLowerCase().includes(filter))&&(!state||clean(r.stage).toUpperCase()===state));
+  const summary=$m('meeraMonitorSummary');if(summary)summary.textContent=filtered.length+' phone-reported records shown (not necessarily Production-confirmed). Drafts are snapshots of the entry form only.';
+  if(!filtered.length){const tr=t.insertRow();const td=tr.insertCell();td.colSpan=8;td.textContent='No matching server-received reports.';return}
+  filtered.forEach(r=>{
+   const tr=t.insertRow();
+   [r.username,(r.unit||'?')+' / '+(r.machine||'?'),r.box,r.product,r.rolls,r.gross,r.stage,r.updatedAt].forEach(value=>{
+    const td=tr.insertCell();td.textContent=clean(value,180);
+   });
+  });
+ }
+ async function refresh(){
+  if(!admin()){statusLine('Only Admin can load remote operator reports.');return}
+  const btn=$m('meeraMonitorRefresh');if(btn)btn.disabled=true;
+  try{
+   const res=await apiGet('meeraMonitorRead',{token:sessionToken,limit:300});
+   if(!res||!res.ok||res.monitorVersion!=='M1'||!Array.isArray(res.items))throw Error(res&&res.error||'Monitor backend not deployed');
+   currentItems=res.items;render(currentItems);statusLine('Connected • Server-received entry form reports. Phone-only unsent data cannot appear here.');
+  }catch(e){statusLine('Monitor not active on LIVE Apps Script: '+clean(e&&e.message||e));}
+  finally{if(btn)btn.disabled=false}
+ }
+ async function start(){
+  if(!online())return;
+  try{
+   const res=await apiGet('meeraMonitorCapabilities',{token:sessionToken});
+   ready=Boolean(res&&res.ok===true&&res.monitorVersion==='M1');
+  }catch(_){ready=false}
+  if(admin())statusLine(ready?'Server monitor available. Select Refresh to load reports.':'Backend MEERA_MONITOR_V1.gs is not installed/deployed yet. No remote phone drafts available.');
+  if(ready)uploadLocalPending().catch(()=>{});
+ }
+ window.meeraMonitorStart=()=>start().catch(()=>{});
+ if(!started){
+  started=true;
+  document.addEventListener('input',e=>{if(e.target&&entryIds.has(e.target.id))scheduleDraft()},true);
+  document.addEventListener('change',e=>{if(e.target&&entryIds.has(e.target.id))scheduleDraft()},true);
+  setInterval(()=>{if(ready&&online())uploadLocalPending().catch(()=>{});},45000);
+  setInterval(()=>{if(admin()&&!$m('view-admin')?.classList.contains('hidden'))refresh().catch(()=>{});},25000);
+  $m('meeraMonitorRefresh')?.addEventListener('click',()=>refresh().catch(()=>{}));
+  $m('meeraMonitorOperator')?.addEventListener('input',()=>render(currentItems));
+  $m('meeraMonitorStage')?.addEventListener('change',()=>render(currentItems));
+  $m('meeraMonitorExport')?.addEventListener('click',()=>{
+   if(!admin()||!currentItems.length)return;
+   const blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),source:'MEERA monitor — server received only',items:currentItems},null,2)],{type:'application/json'});
+   const a=document.createElement('a'),url=URL.createObjectURL(blob);
+   a.href=url;a.download='MEERA_ADMIN_MONITOR_VISIBLE_'+new Date().toISOString().slice(0,10)+'.json';a.click();
+   setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+  document.addEventListener('click',e=>{
+   if(e.target?.closest?.('[data-view="admin"]'))setTimeout(()=>refresh().catch(()=>{}),250);
+  },true);
+ }
+})();
 </script>
 </body>
 </html>
