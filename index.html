@@ -882,6 +882,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
           <button type="button" class="btn btn-primary" id="v9SyncNow">↻ Sync / Check Queue</button>
           <button type="button" class="btn btn-secondary" id="v9Export">🔒 Download Protected Backup</button>
           <button type="button" class="btn btn-secondary" id="v9ImportButton">⬆ Import Backup</button>
+          <button type="button" class="btn btn-secondary" id="v9ClearOldLocal" style="border-color:#b45309;color:#92400e">🧹 Clear My Old Local Data</button>
           <input id="v9ImportFile" type="file" accept="application/json,.json,text/html,.html" style="display:none">
         <div class="v9-actions" id="meeraRecoveryActions" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
           <button type="button" class="btn btn-secondary" id="meeraRecoverImport">📥 Import OLD Backup for Recovery</button>
@@ -2745,6 +2746,43 @@ async function meeraRecoveryExportReport(){
   const csv=[header,...rows.map(r=>[r.requestId,r.box,r.state,r.verification,r.lastError,r.checkedAt||''])].map(r=>r.map(escapeCsv).join(',')).join('\r\n');
   v102Download('MEERA_RECOVERY_REPORT_'+v9Owner()+'.csv',csv,'text/csv;charset=utf-8');
 }
+// Clears only the currently logged-in owner's browser records, NOT LIVE sheets.
+// The operator must first export and preserve a separate backup.
+async function meeraClearOldLocalData(){
+  meeraRecoveryAssertLogin();
+  if(v9WorkerBusy||v9LocalBusy||meeraRecoveryBusy)throw Error('Sync or entry save is running. Try again when it stops.');
+  if(!v9Db||!v9StorageReady)throw Error('Local queue storage is not ready.');
+  const owner=v9Owner();
+  if(!confirm('PERMANENT LOCAL CLEAR for '+owner+' on THIS browser only. Your old entries may still be missing from LIVE. Confirm you have exported the backup to a different device. Continue?'))return;
+  const typed=prompt('To clear old browser records, type exactly: CLEAR '+owner);
+  if(typed!=='CLEAR '+owner){meeraRecoverySay('Clear cancelled. No records deleted.');return}
+  if(!await v9Lease(false,owner))throw Error('Another browser tab is syncing. Close other tabs first.');
+  v9WorkerBusy=true;
+  const btn=document.getElementById('v9ClearOldLocal');
+  if(btn)btn.disabled=true;
+  let queueDeleted=0,recoveryDeleted=0;
+  try{
+    if(v9Owner()!==owner)throw Error('User changed during clear; cancelled.');
+    // Delete this user only; other users' entries are untouched.
+    await v9Transaction('entries','readwrite',(store)=>{
+      const req=store.index('owner').getAllKeys(owner);
+      req.onsuccess=()=>{const keys=req.result||[];queueDeleted=keys.length;keys.forEach(k=>store.delete(k))};
+    });
+    const recovery=await meeraRecoveryAll();
+    const own=recovery.filter(r=>r.owner===owner);
+    await meeraRecoveryTx('readwrite',(store)=>{for(const r of own)store.delete(r.key)});
+    recoveryDeleted=own.length;
+    await v9Transaction('meta','readwrite',(store)=>{store.delete('nextseq:'+owner)});
+    v9KnownBoxes=new Set();
+    await v9RefreshUi();
+    meeraRecoverySay('LOCAL CLEAR COMPLETE for '+owner+': '+queueDeleted+' queue records and '+recoveryDeleted+' recovery records cleared on THIS browser. LIVE Google Sheet and downloaded backups are unchanged. Log in and start fresh.');
+  }finally{
+    v9WorkerBusy=false;
+    if(btn)btn.disabled=false;
+    await v9Release(owner);
+    v9Schedule(12000);
+  }
+}
 /* ===== End separate recovery module ===== */
 
 /* -------- Event wiring -------- */
@@ -2757,6 +2795,7 @@ document.addEventListener("DOMContentLoaded",async()=>{
   $("entryForm").addEventListener("submit",saveEntry);v9SetButton();v9ObserveQueuePanel();
   $("v9SyncNow").addEventListener("click",()=>v9Schedule(20));
   $("v9Export").addEventListener("click",()=>v9Export().catch(e=>showStatus("formStatus",e.message,"err")));
+  $("v9ClearOldLocal").addEventListener("click",()=>meeraClearOldLocalData().catch(e=>meeraRecoverySay('Clear not completed: '+e.message+'. Preserve your downloaded backup.')));
   $("v9ImportButton").addEventListener("click",()=>$("v9ImportFile").click());
   $("v9ImportFile").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{await v9Import(f)}catch(x){showStatus("formStatus",x.message,"err")}e.target.value=""});
   $("meeraRecoverImport").addEventListener("click",()=>$("meeraRecoverFile").click());
