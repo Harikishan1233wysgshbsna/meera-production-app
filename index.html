@@ -3364,7 +3364,7 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
      return;
    }
    addMessage('user',text);
-   if(/^clear[\\s_-]+old[\\s_-]+(?:bro|browser|payload|data)$/i.test(text)){
+   if(/^clear[\s_-]+old[\s_-]+(?:bro|browser|payload|data)$/i.test(text)){
      if(!sessionVerified||!currentUser){addMessage('ai','Log in online before clearing old local entries.');return;}
      clearAwaitingOwner=v9Owner();
      addMessage('ai','PERMANENT LOCAL CLEAR for '+clearAwaitingOwner+' on THIS browser only. Make sure all old entries are backed up outside this phone. LIVE Google Sheet will not change. Type 8812 and press Enter to confirm, or CANCEL to stop.','Local confirmation');
