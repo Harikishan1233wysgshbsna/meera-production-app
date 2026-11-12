@@ -882,7 +882,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
           <button type="button" class="btn btn-primary" id="v9SyncNow">↻ Sync / Check Queue</button>
           <button type="button" class="btn btn-secondary" id="v9Export">🔒 Download Protected Backup</button>
           <button type="button" class="btn btn-secondary" id="v9ImportButton">⬆ Import Backup</button>
-          <button type="button" class="btn btn-secondary" id="v9ClearOldLocal" style="border-color:#b45309;color:#92400e">🧹 Clear My Old Local Data</button>
+          <button type="button" class="btn btn-primary" id="v9ClearOldLocal" style="background:#92400e;color:#fff;border:2px solid #92400e;font-weight:700">🧹 CLEAR OLD PAYLOAD / START FRESH</button>
           <input id="v9ImportFile" type="file" accept="application/json,.json,text/html,.html" style="display:none">
         <div class="v9-actions" id="meeraRecoveryActions" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
           <button type="button" class="btn btn-secondary" id="meeraRecoverImport">📥 Import OLD Backup for Recovery</button>
@@ -892,6 +892,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
         </div>
         <div id="meeraRecoverStatus" role="status" aria-live="polite" style="padding:10px;border:1px solid #bfcae4;border-radius:10px;margin:8px 0;white-space:pre-wrap;font-size:13px">Recovery: Log in, import your old backup, then Sync All. A verified server status is required; uploading alone is not confirmation.</div>
         <p class="v9-hint">Recovery reads your own phone backup; all statuses including SAVED / DUPLICATE are eligible. Existing Request IDs will not be inserted twice. Keep your original backup. The recovery panel uses separate IndexedDB storage and does not erase the normal queue.</p>
+        <p class="v9-hint" style="font-weight:700;color:#92400e">To remove old phone payload after storing a backup outside this phone, tap CLEAR OLD PAYLOAD above, confirm, and check that the queue shows 0. This never clears LIVE Google Sheets.</p>
         </div>
         <div class="table-wrap v9-queue-table"><table><thead><tr><th>Box</th><th>Status</th><th>Created (UTC)</th><th>ID end</th><th>Action</th></tr></thead>
           <tbody id="v9QueueBody"><tr><td colspan="5">Open the app and log in to view queue.</td></tr></tbody></table></div>
@@ -2783,10 +2784,17 @@ async function meeraClearOldLocalData(){
     const own=recovery.filter(r=>r.owner===owner);
     await meeraRecoveryTx('readwrite',(store)=>{for(const r of own)store.delete(r.key)});
     recoveryDeleted=own.length;
+    // This old localStorage payload otherwise gets migrated BACK into the queue on next login.
+    localStorage.removeItem(V9_LEGACY_PREFIX+owner);
     await v9Transaction('meta','readwrite',(store)=>{store.delete('nextseq:'+owner)});
     v9KnownBoxes=new Set();
     await v9RefreshUi();
-    meeraRecoverySay('LOCAL CLEAR COMPLETE for '+owner+': '+queueDeleted+' queue records and '+recoveryDeleted+' recovery records cleared on THIS browser. LIVE Google Sheet and downloaded backups are unchanged. Log in and start fresh.');
+    const qLeft=(await v9GetAll(owner)).length;
+    const rLeft=(await meeraRecoveryAll()).filter(r=>r.owner===owner).length;
+    if(qLeft||rLeft)throw Error('Clear verification failed: '+qLeft+' queue and '+rLeft+' recovery entries remain. Retry after closing other tabs.');
+    const message='✅ OLD LOCAL PAYLOAD CLEARED for '+owner+': '+queueDeleted+' queue records + '+recoveryDeleted+' recovery records removed. Remaining: 0. LIVE Sheet and saved off-phone backup unchanged. New entries can start.';
+    meeraRecoverySay(message);
+    showStatus('formStatus',message,'ok');
   }finally{
     v9WorkerBusy=false;
     if(btn)btn.disabled=false;
