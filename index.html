@@ -2471,10 +2471,14 @@ async function saveEntry(event){
   const productText=$("prodSearch").value.trim(),selectedProduct=$("selectedProduct").value.trim();
   let productRecord=uniqueProducts().find(p=>normaliseProductKey(p.name)===normaliseProductKey(selectedProduct));
   if(!productRecord){productRecord={name:selectedProduct,yarn:$("yarnCode").value||""}}
-  // A Product Name is mandatory. Never enqueue a blank product payload.
-  const product=productText||productRecord.name||selectedProduct||'';
-  if(!product.trim()){
-    showStatus("formStatus","PRODUCT NAME REQUIRED — Select or type the Product Name before saving. No entry queued.","err");
+  // Require the exact selected Product / variant before writing any local payload.
+  // Free text, missing [S]/[Z] variant or a changed selection is not sufficient.
+  const product=selectedProduct;
+  const validSelected=Boolean(product.trim()) &&
+    normaliseProductKey(productText)===normaliseProductKey(product) &&
+    (v12MasterMode?v12IsMasterProduct(product):isProductAssignedToMachine(product,machine));
+  if(!validSelected){
+    showStatus("formStatus","PRODUCT / VARIANT REQUIRED: select the exact Product Name including [S] or [Z] from the list. Nothing was queued.","err");
     $("prodSearch").focus();return;
   }
   const digits=boxDigits($("box").value);if(!digits){showStatus("formStatus","Enter the numeric box number.","err");return}
