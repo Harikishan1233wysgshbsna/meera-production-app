@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#09111e">
+<meta name="description" content="A private creative workspace for scripts, scene prompts, storyboards and browser-rendered animatics.">
+<title>MEERA CREATIVE STUDIO — AI Video Workspace</title>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:dark;--bg:#080e19;--panel:#101d2f;--panel2:#14243a;--line:#2c4059;--txt:#f4f8ff;--muted:#9eb1cb;--accent:#8dc4ff;--gold:#ffc57f;--ok:#5bd5a5}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% 0,#183250 0,#080e19 55%);color:var(--txt);min-height:100dvh}button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid #4a6180;background:#233e60;color:white;border-radius:11px;padding:10px 14px;transition:.17s}button:hover{background:#365f8d}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button.primary{background:linear-gradient(135deg,#5487eb,#785dd3);border-color:#9cafff;font-weight:750}button.warn{color:#ffdbac;border-color:#8c6041;background:#322619}button.ghost{background:transparent}button.small{padding:6px 10px;font-size:12px}button:disabled{opacity:.5;cursor:not-allowed}a{color:#b7d7ff}
+.top{position:sticky;top:0;z-index:4;display:flex;gap:14px;align-items:center;justify-content:space-between;background:#0a1424e9;backdrop-filter:blur(18px);border-bottom:1px solid var(--line);padding:12px max(18px,calc((100vw - 1500px)/2))}.brand{display:flex;gap:10px;align-items:center;font-weight:800;letter-spacing:.02em}.brandlogo{font-size:24px}.tag{font-size:10px;color:#d8e8ff;background:#385077;padding:5px 8px;border-radius:99px}.topnav{display:flex;flex-wrap:wrap;gap:8px}.layout{max-width:1500px;margin:0 auto;padding:20px;display:grid;grid-template-columns:minmax(260px,315px) minmax(300px,1fr) minmax(300px,380px);gap:15px;align-items:start}.panel{background:#101d2fe8;border:1px solid var(--line);border-radius:19px;padding:18px;min-width:0;box-shadow:0 10px 40px #0002}.panel h2{font-size:16px;margin:0 0 8px}.panel p{line-height:1.5}.sub{color:var(--muted);font-size:12px}.section{margin-top:19px;border-top:1px solid var(--line);padding-top:16px}.field{display:grid;gap:5px;margin:12px 0}.field label{font-size:12px;color:#bcd0ea;font-weight:700}.field input,.field textarea,.field select{width:100%;background:#0b1625;color:var(--txt);border:1px solid #354b68;border-radius:11px;padding:11px;line-height:1.4}.field textarea{min-height:75px;resize:vertical}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions{display:flex;flex-wrap:wrap;gap:8px}.actions>*{flex:0 0 auto}.notice{background:#1e2c3e;border:1px solid #3d5677;padding:12px;border-radius:13px;color:#d8e8fa;font-size:12px;line-height:1.5}.notice b{color:var(--gold)}
+.scene{width:100%;text-align:left;display:block;background:#15273c;border:1px solid #35516c;padding:12px;margin:9px 0;border-radius:13px}.scene.active{border-color:#8bc2ff;box-shadow:inset 3px 0 #86b8ff;background:#203955}.scene .num{font-size:10px;color:#9abcde}.scene .title{font-size:14px;font-weight:760;margin:3px 0 5px}.scene .meta{font-size:11px;color:#aac2db}.scene-head{display:flex;gap:12px;justify-content:space-between;align-items:start}.scene-num{background:#284363;border-radius:9px;padding:6px 10px;font-size:13px;color:#bcd8f5}.preview{min-height:210px;border-radius:15px;border:1px solid #51617a;background:linear-gradient(160deg,#1c5260,#102341 55%,#28344e);display:flex;flex-direction:column;justify-content:end;padding:22px;position:relative;overflow:hidden;isolation:isolate}.preview:before{content:"";position:absolute;inset:-50%;z-index:-1;background:radial-gradient(ellipse,#7bb1a044,transparent 60%);animation:move 12s ease-in-out infinite alternate}@keyframes move{from{transform:translate(-10%,2%)}to{transform:translate(8%,-7%)}}.preview .kicker{font-size:10px;letter-spacing:.19em;font-weight:800;color:#b8dfff}.preview strong{font-size:22px;text-shadow:0 3px 9px #000}.preview small{font-size:12px;max-width:580px;line-height:1.5;margin-top:8px;color:#e4f1fa}.prompt{white-space:pre-wrap;background:#071322;padding:15px;border:1px solid #344b69;border-radius:12px;color:#d7eaff;font-size:12px;line-height:1.5;max-height:340px;overflow:auto}.chatlog{height:380px;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:8px 2px}.bubble{background:#203552;border:1px solid #3b567b;padding:11px 13px;border-radius:14px;font-size:12px;line-height:1.55;white-space:pre-wrap;max-width:95%;align-self:start}.bubble.user{align-self:end;background:#3b3669}.bubble .who{font-size:10px;color:#acd1ff;font-weight:800;margin-bottom:4px}.chatinput{display:flex;gap:6px;margin-top:10px}.chatinput textarea{flex:1;min-width:0;background:#081627;color:#fff;border:1px solid #46607f;border-radius:12px;padding:10px;resize:vertical;min-height:52px;max-height:130px}.chatinput button{align-self:end}.foot{max-width:1500px;margin:auto;padding:15px 25px 30px;color:#8296b5;font-size:12px}.status{min-height:18px;font-size:12px;color:#a8d7fc;margin-top:8px}.pill{display:inline-block;font-size:10px;color:#c4d9f8;border:1px solid #435979;padding:4px 7px;border-radius:99px}.mode{color:#ffe2ac}.thumb{width:100%;max-height:170px;object-fit:cover;border-radius:10px;border:1px solid #405a78;margin:10px 0}.off{display:none}.key{color:#e6d0ff}.scrolltop{scroll-margin-top:95px}
+@media(max-width:1120px){.layout{grid-template-columns:minmax(230px,.8fr) minmax(350px,1.2fr)}.assistantpanel{grid-column:1/-1}}@media(max-width:720px){.layout{display:block;padding:12px}.layout>.panel{margin-bottom:13px}.top{position:relative;padding:14px;flex-wrap:wrap}.topnav{justify-content:flex-start}.chatlog{height:250px}.two{grid-template-columns:1fr 1fr}.preview{min-height:180px}}
+</style>
+</head>
+<body>
+<header class="top">
+ <div class="brand"><span class="brandlogo">🎬</span><span>MEERA <span style="color:#9dbdff">CREATIVE STUDIO</span></span><span class="tag">BETA • PRIVATE BROWSER WORKSPACE</span></div>
+ <nav class="topnav"><button id="saveBtn" class="small">💾 Save Project</button><button id="exportBtn" class="small">⬇ Project JSON</button><button id="importBtn" class="small">⬆ Import</button><button id="resetBtn" class="small warn">New Project</button><input id="importFile" type="file" accept=".json,application/json" hidden></nav>
+</header>
+<main class="layout">
+ <section class="panel">
+   <h2>🎞 Project Director</h2><p class="sub">Build consistent cinematic scenes and export prompts to an AI video generator.</p>
+   <div class="field"><label for="projectTitle">Project name</label><input id="projectTitle" maxlength="100"></div>
+   <div class="two"><div class="field"><label for="aspect">Frame ratio</label><select id="aspect"><option>16:9</option><option>9:16</option><option>1:1</option></select></div><div class="field"><label for="style">Visual style</label><select id="style"><option>Photorealistic 3D fantasy</option><option>Cinematic live action</option><option>Animated movie</option><option>Stylized comic</option><option>Documentary</option></select></div></div>
+   <div class="field"><label for="character">Character Bible — keep identity consistent</label><textarea id="character" rows="5"></textarea></div>
+   <div class="field"><label for="world">World / Location Bible</label><textarea id="world" rows="4"></textarea></div>
+   <div class="field"><label for="rules">Consistency & negative rules</label><textarea id="rules" rows="4"></textarea></div>
+   <div class="section"><div class="scene-head"><h2>📑 Scenes <span id="count" class="pill">0</span></h2><button id="addBtn" class="small primary">+ New Scene</button></div><div id="scenes"></div><div class="actions"><button id="duplicateBtn" class="small">Duplicate Scene</button><button id="removeBtn" class="small warn">Delete Scene</button></div></div>
+   <div class="section notice"><b>Data privacy:</b> Project notes are saved in this browser, not GitHub. Import/Export JSON for backup. Uploaded reference images stay on this device. Do not put API keys in a GitHub Pages file.</div>
+ </section>
+ <section class="panel scrolltop" id="editor">
+   <div class="scene-head"><div><h2>🎥 Scene Editor</h2><p class="sub">Each scene becomes one clear video-generation prompt.</p></div><span id="sceneNumber" class="scene-num">SHOT 01</span></div>
+   <div id="visual" class="preview"><span class="kicker">STORYBOARD PREVIEW • NOT AI VIDEO</span><strong id="visualTitle"></strong><small id="visualAction"></small></div>
+   <div class="field"><label for="refUpload">Reference photo for this shot (optional — kept locally until page closes)</label><input id="refUpload" type="file" accept="image/*"><img id="refPreview" class="thumb off" alt="Scene reference image"></div>
+   <div class="field"><label for="shotTitle">Shot title</label><input id="shotTitle" maxlength="140"></div>
+   <div class="two"><div class="field"><label for="duration">Duration</label><select id="duration"><option value="4">4 seconds</option><option value="6">6 seconds</option><option value="8">8 seconds</option><option value="10">10 seconds</option></select></div><div class="field"><label for="cameraType">Camera preset</label><select id="cameraType"><option>Steady tracking</option><option>360° orbit</option><option>Close-up</option><option>Aerial drone</option><option>Handheld follow</option><option>Wide establishing</option><option>Low-angle action</option><option>Over-the-shoulder</option></select></div></div>
+   <div class="field"><label for="action">What happens on camera?</label><textarea id="action" rows="4"></textarea></div>
+   <div class="field"><label for="dialogue">Dialogue (English / Hindi)</label><textarea id="dialogue" rows="3"></textarea></div>
+   <div class="field"><label for="audio">Sounds / Atmosphere</label><textarea id="audio" rows="2"></textarea></div>
+   <div class="section"><h2>✨ Generated Shot Prompt</h2><p class="sub">Generated from your project and this scene. Copy for Flow, Runway, or another video tool.</p><div id="prompt" class="prompt"></div><div class="actions" style="margin-top:12px"><button id="copyShot" class="primary">📋 Copy Shot Prompt</button><button id="copyAll">Copy All Scenes</button><button id="flowBtn">↗ Open Google Flow</button></div></div>
+   <div class="section"><h2>🎬 Make a video</h2><p class="sub">The Browser Animatic is an actual simple WebM storyboard video with moving titles / reference photos, <b>not</b> AI-generated cinematic footage.</p><div class="actions"><button id="animaticBtn" class="primary">▶ Export Storyboard WebM</button><button id="chatgptBtn">↗ Open ChatGPT</button></div><div id="renderStatus" class="status"></div></div>
+ </section>
+ <section class="panel assistantpanel">
+   <h2>💬 Creator Copilot <span class="pill mode">Offline prompt helper</span></h2>
+   <p class="sub">Chat-style creative tools. Not connected to ChatGPT's model yet. For real AI replies, open ChatGPT; for video generation, use Flow or a secure video API.</p>
+   <div class="actions"><button id="actionPreset" class="small">⚡ Action</button><button id="dramaPreset" class="small">🎭 Drama</button><button id="mysteryPreset" class="small">🌫 Mystery</button><button id="sceneFromChat" class="small">+ Scene from chat</button></div>
+   <div id="chatlog" class="chatlog" aria-live="polite"></div>
+   <div class="chatinput"><textarea id="chat" placeholder="Describe a shot, e.g. Itashi runs through foggy jungle…"></textarea><button id="send" class="primary">Send</button></div>
+   <div class="section"><h2>🧭 Workflows</h2><div class="notice">① Write or improve scenes here.<br>② Copy a scene prompt.<br>③ Open <a href="https://labs.google/fx/tools/flow" target="_blank" rel="noopener noreferrer">Google Flow</a> to generate AI footage.<br>④ Download your finished AI clips from the provider.<br>⑤ Return here to plan the next consistent scene.</div></div>
+   <div class="section"><p class="sub" id="saveState">Project: not saved yet</p></div>
+ </section>
+</main>
+<footer class="foot">MEERA Creative Studio • Independent from the LIVE Production Entry app • No credentials, user production data, or factory queues are accessed here.</footer>
+<script>
+(function(){
+ 'use strict';
+ const KEY='meera_creative_studio_v1';
+ const $=id=>document.getElementById(id);
+ const sceneFields=['shotTitle','duration','cameraType','action','dialogue','audio'];
+ const blank=()=>({id:'sc-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),title:'New cinematic shot',duration:'8',camera:'Steady tracking',action:'Describe the visible action...',dialogue:'',audio:'Natural ambient sound',ref:null});
+ const defaults=()=>({
+  project:'THE FOREST MESSENGER — FIND THE ISLAND',
+  aspect:'16:9',
+  style:'Photorealistic 3D fantasy',
+  character:'ITASHI: Young hero, messy spiky blue-black hair, blue denim jacket with orange-white accents, black hoodie, dog-tag necklace, black cargo pants, boots and backpack. Preserve identical face, body proportions, clothes and voice across shots.',
+  world:'Ancient emerald rainforest valley. Gigantic trees, moss-covered cliffs, multiple waterfalls, distant green mountains, drifting white fog, soft overcast daylight. Keep the geography consistent in every scene.',
+  rules:'Natural physics and camera motion; cinematic lighting; no character duplication; no outfit changes; no extra hands or fingers; no unrelated dialogue. Keep human-like monsters upright and bipedal.',
+  scenes:[
+   {id:'forest1',title:'Itashi in the valley',duration:'8',camera:'Wide establishing',action:'Itashi enters the lush valley. Camera slowly tracks behind him as fog parts among giant trees. A waterfall appears in the distance.',dialogue:'Itashi: Where in the world am I?',audio:'Birdsong, distant waterfall, footsteps, no music',ref:null},
+   {id:'forest2',title:'The hidden black raven',duration:'8',camera:'Aerial drone',action:'A black raven with faint smoky eyes flies between ancient trees, passes over a waterfall and lands on a high branch. Keep the same continuous rainforest geography.',dialogue:'',audio:'Natural raven call, wing flaps, forest wind',ref:null},
+   {id:'forest3',title:'A mysterious ancient box',duration:'8',camera:'Close-up',action:'Itashi kneels beside a fallen tree and finds a small ancient carved box inside his backpack. He carefully examines the lid but cannot open it.',dialogue:'Itashi: Of course. A mysterious box in a mysterious jungle. What could possibly go wrong?',audio:'Cloth rustle, tiny wooden creaks, ambient jungle',ref:null}
+  ]
+ });
+ let state,selected=0,refUrls=new Map(),rendering=false,chatDraft='';
+ try{
+   const raw=localStorage.getItem(KEY),p=raw&&JSON.parse(raw);
+   state=p&&Array.isArray(p.scenes)&&p.scenes.length?p:defaults();
+ }catch(_){state=defaults()}
+ function current(){return state.scenes[selected]||state.scenes[0]}
+ function cleanProject(p){return {project:p.project,aspect:p.aspect,style:p.style,character:p.character,world:p.world,rules:p.rules,scenes:p.scenes.map(s=>({id:s.id,title:s.title,duration:s.duration,camera:s.camera,action:s.action,dialogue:s.dialogue,audio:s.audio}))}}
+ function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(cleanProject(state)));$('saveState').textContent='Saved on this device • '+new Date().toLocaleTimeString();$('saveState').style.color='#83d9b1'}
+  catch(e){$('saveState').textContent='Browser storage full or unavailable. Export Project JSON for backup.';$('saveState').style.color='#ffc57f'}
+ }
+ function fillGlobal(){
+  $('projectTitle').value=state.project;$('aspect').value=state.aspect;$('style').value=state.style;
+  $('character').value=state.character;$('world').value=state.world;$('rules').value=state.rules;
+ }
+ function renderSceneList(){
+  $('count').textContent=state.scenes.length+' scenes';
+  const root=$('scenes');root.replaceChildren();
+  state.scenes.forEach((s,i)=>{
+   const b=document.createElement('button');b.type='button';b.className='scene'+(i===selected?' active':'');
+   const num=document.createElement('div');num.className='num';num.textContent='SCENE '+String(i+1).padStart(2,'0')+' • '+s.duration+'s';
+   const t=document.createElement('div');t.className='title';t.textContent=s.title||'Untitled';
+   const meta=document.createElement('div');meta.className='meta';meta.textContent=s.camera||'Camera unset';
+   b.append(num,t,meta);b.onclick=()=>{selected=i;renderAll();};root.appendChild(b);
+  });
+ }
+ function showRef(){
+  const s=current(),url=refUrls.get(s.id);$('refPreview').classList.toggle('off',!url);
+  if(url)$('refPreview').src=url;else $('refPreview').removeAttribute('src');
+ }
+ function shotPrompt(s,i){
+  return [
+   'CINEMATIC VIDEO SHOT '+String(i+1).padStart(2,'0')+' — '+s.title,
+   'Duration: '+s.duration+' seconds. Aspect ratio: '+state.aspect+'.',
+   'Visual style: '+state.style+'.',
+   '',
+   'CHARACTER CONSISTENCY: '+state.character,
+   'WORLD / LOCATION CONSISTENCY: '+state.world,
+   'ACTION ON CAMERA: '+s.action,
+   'CAMERA MOVEMENT: '+s.camera+'. Smooth, plausible continuous motion.',
+   'DIALOGUE: '+(s.dialogue||'No dialogue.'),
+   'AUDIO: '+(s.audio||'Realistic environmental sound.'),
+   'NEGATIVE / SAFETY CONSTRAINTS: '+state.rules,
+   'Ensure the subject looks, sounds and moves consistently through this entire clip.'
+  ].join('\n');
+ }
+ function allPrompts(){return state.scenes.map((s,i)=>shotPrompt(s,i)).join('\n\n'+'='.repeat(46)+'\n\n')}
+ function renderCurrent(){
+  const s=current();
+  $('sceneNumber').textContent='SHOT '+String(selected+1).padStart(2,'0');
+  $('shotTitle').value=s.title;$('duration').value=s.duration;$('cameraType').value=s.camera;
+  $('action').value=s.action;$('dialogue').value=s.dialogue;$('audio').value=s.audio;
+  $('visualTitle').textContent=s.title;$('visualAction').textContent=s.action;
+  $('prompt').textContent=shotPrompt(s,selected);showRef();
+ }
+ function renderAll(){fillGlobal();renderSceneList();renderCurrent()}
+ function updateCurrent(){const s=current();s.title=$('shotTitle').value;s.duration=$('duration').value;s.camera=$('cameraType').value;s.action=$('action').value;s.dialogue=$('dialogue').value;s.audio=$('audio').value;renderSceneList();$('visualTitle').textContent=s.title;$('visualAction').textContent=s.action;$('prompt').textContent=shotPrompt(s,selected);save()}
+ ['projectTitle','aspect','style','character','world','rules'].forEach(id=>{
+  $(id).addEventListener('input',()=>{
+   state.project=$('projectTitle').value;state.aspect=$('aspect').value;state.style=$('style').value;state.character=$('character').value;state.world=$('world').value;state.rules=$('rules').value;
+   $('prompt').textContent=shotPrompt(current(),selected);save();
+  });
+ });
+ sceneFields.forEach(id=>$(id).addEventListener('input',updateCurrent));
+ $('addBtn').onclick=()=>{state.scenes.push(blank());selected=state.scenes.length-1;save();renderAll();};
+ $('duplicateBtn').onclick=()=>{const s=JSON.parse(JSON.stringify(current()));s.id=blank().id;s.title=s.title+' — variation';state.scenes.splice(selected+1,0,s);selected++;save();renderAll();};
+ $('removeBtn').onclick=()=>{
+  if(state.scenes.length===1){alert('Keep at least one scene.');return}
+  if(!confirm('Delete this scene from the project?'))return;
+  state.scenes.splice(selected,1);selected=Math.min(selected,state.scenes.length-1);save();renderAll();
+ };
+ function download(text,filename,type){
+  const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+ }
+ function filename(){return String(state.project||'video-project').replace(/[^a-z0-9_-]+/gi,'_').slice(0,60)}
+ $('saveBtn').onclick=()=>{save();alert('Project saved to this browser. Export JSON for a backup that works on another device.')};
+ $('exportBtn').onclick=()=>download(JSON.stringify(cleanProject(state),null,2),filename()+'.json','application/json');
+ $('importBtn').onclick=()=>$('importFile').click();
+ $('importFile').onchange=async e=>{
+  const file=e.target.files&&e.target.files[0];if(!file)return;
+  try{
+   if(file.size>1500000)throw Error('Project JSON is too large');
+   const p=JSON.parse(await file.text());
+   if(!p||!Array.isArray(p.scenes)||!p.scenes.length||p.scenes.length>200)throw Error('Invalid scene collection');
+   state={project:String(p.project||'New Project').slice(0,100),aspect:['16:9','9:16','1:1'].includes(p.aspect)?p.aspect:'16:9',style:String(p.style||'Cinematic live action'),character:String(p.character||'').slice(0,10000),world:String(p.world||'').slice(0,10000),rules:String(p.rules||'').slice(0,10000),scenes:p.scenes.map(s=>({id:blank().id,title:String(s.title||'Scene').slice(0,140),duration:['4','6','8','10'].includes(String(s.duration))?String(s.duration):'8',camera:String(s.camera||'Steady tracking'),action:String(s.action||'').slice(0,10000),dialogue:String(s.dialogue||'').slice(0,10000),audio:String(s.audio||'').slice(0,10000)}))};
+   selected=0;save();renderAll();addChat('assistant','Project imported. Reference photos are intentionally not included in JSON.');}
+  catch(err){alert('Could not import: '+err.message)}
+  e.target.value='';
+ };
+ $('resetBtn').onclick=()=>{if(!confirm('Start a new project? Export the existing project first if you need it.'))return;state=defaults();selected=0;refUrls.forEach(url=>URL.revokeObjectURL(url));refUrls.clear();save();renderAll();};
+ async function copy(text){
+  try{await navigator.clipboard.writeText(text);setStatus('Prompt copied. Paste it into your AI video tool.');return}
+  catch(_){const t=document.createElement('textarea');t.value=text;t.style.cssText='position:fixed;left:-9999px';document.body.append(t);t.select();try{document.execCommand('copy');setStatus('Prompt copied.')}catch(e){setStatus('Copy is blocked; select text from Generated Shot Prompt.')}t.remove();}
+ }
+ function setStatus(t){$('renderStatus').textContent=t}
+ $('copyShot').onclick=()=>copy(shotPrompt(current(),selected));
+ $('copyAll').onclick=()=>copy(allPrompts());
+ $('flowBtn').onclick=async()=>{await copy(shotPrompt(current(),selected));window.open('https://labs.google/fx/tools/flow','_blank','noopener,noreferrer')};
+ $('chatgptBtn').onclick=async()=>{await copy('Help me improve this scene for cinematic AI video generation:\n\n'+shotPrompt(current(),selected));window.open('https://chatgpt.com/','_blank','noopener,noreferrer')};
+ $('refUpload').onchange=e=>{
+  const file=e.target.files&&e.target.files[0];if(!file)return;
+  if(!file.type.startsWith('image/')||file.size>10000000){alert('Choose an image under 10MB.');return}
+  const id=current().id,old=refUrls.get(id);if(old)URL.revokeObjectURL(old);
+  refUrls.set(id,URL.createObjectURL(file));showRef();setStatus('Reference image is private in this tab; it will not persist after closing.');e.target.value='';
+ };
+ function addChat(who,msg){const root=$('chatlog'),div=document.createElement('div');div.className='bubble'+(who==='user'?' user':'');const t=document.createElement('div');t.className='who';t.textContent=who==='user'?'YOU':'CREATOR COPILOT • LOCAL';div.append(t,document.createTextNode(msg));root.append(div);root.scrollTop=root.scrollHeight;}
+ function respond(message){
+  const q=message.toLowerCase();
+  if(/new scene|naya scene|next scene|अगला सीन|अगला सीन|add scene/.test(q)){const s=blank();s.title=message.slice(0,100);s.action=message;state.scenes.push(s);selected=state.scenes.length-1;save();renderAll();return 'Added a new shot to your storyboard. Set camera, duration and dialogue in the Scene Editor.'}
+  if(/dialogue|डायलॉग|बातचीत/.test(q)){return 'Dialogue guide: Use exactly one speaker at a time, short fluent lines, clear emotional beats, accurate lip-sync and no background voices. Edit the Dialogue field for this shot.'}
+  if(/camera|कैमरा|360|orbit/.test(q)){current().camera='360° orbit';save();renderAll();return 'Camera set to a steady 360° orbit. Keep a constant distance and height and protect character identity between frames.'}
+  if(/action|fight|लड़ाई|chase|भाग/.test(q)){current().camera='Handheld follow';save();renderAll();return 'Action preset applied: precise feet contact, controlled fast follow, natural impacts and realistic motion blur. Describe choreography in Action.'}
+  if(/mystery|fog|जंगल|forest|रहस्य/.test(q)){current().camera='Wide establishing';save();renderAll();return 'Mystery preset applied: a slow establishing shot, volumetric fog, environmental audio and a delayed character reveal.'}
+  return 'I have recorded your idea locally. For a full creative AI rewrite, tap Open ChatGPT (your prompt will be copied). For actual text-to-video rendering, tap Open Google Flow. This in-browser helper does not call a generative AI model.';
+ }
+ function send(){
+  const t=$('chat').value.trim();if(!t)return;chatDraft=t;$('chat').value='';addChat('user',t);addChat('assistant',respond(t));
+ }
+ $('send').onclick=send;
+ $('chat').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}};
+ $('actionPreset').onclick=()=>{current().camera='Handheld follow';current().audio='Fast natural movement, footfall impacts and cinematic environment sound';updateCurrentFromScene();addChat('assistant','Action camera and natural impact sound applied.');};
+ $('dramaPreset').onclick=()=>{current().camera='Close-up';current().audio='Soft environmental ambience, controlled breathing, emotional silence';updateCurrentFromScene();addChat('assistant','Dramatic close-up and intimate ambient audio applied.');};
+ $('mysteryPreset').onclick=()=>{current().camera='Wide establishing';current().audio='Mysterious forest wind, echoing birds, distant waterfall';updateCurrentFromScene();addChat('assistant','Mystery atmosphere applied.');};
+ $('sceneFromChat').onclick=()=>{const t=$('chat').value.trim()||chatDraft;if(!t){alert('Write a scene idea in chat first.');return}const s=blank();s.title=t.slice(0,100);s.action=t;state.scenes.push(s);selected=state.scenes.length-1;save();renderAll();addChat('assistant','Scene created from your idea.')};
+ function updateCurrentFromScene(){save();renderAll()}
+ // Export a *real* WebM animated storyboard, not model-generated footage.
+ async function exportAnimatic(){
+  if(rendering)return;
+  if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream){setStatus('Video export unsupported in this browser. Use Chrome/Edge on a computer, or Export JSON.');return}
+  if(!confirm('Create a simple moving storyboard WebM with scene titles and your uploaded reference photos? This is NOT AI-generated footage.'))return;
+  const mimetypes=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  const mime=mimetypes.find(m=>MediaRecorder.isTypeSupported(m));
+  if(!mime){setStatus('WebM recording unsupported in this browser. Use Chrome/Edge on a computer.');return}
+  rendering=true;$('animaticBtn').disabled=true;setStatus('Rendering storyboard…');
+  const vertical=state.aspect==='9:16',square=state.aspect==='1:1';
+  const W=vertical?540:square?640:960,H=vertical?960:square?640:540;
+  const can=document.createElement('canvas');can.width=W;can.height=H;
+  const ctx=can.getContext('2d');const fps=24;const stream=can.captureStream(fps);
+  const chunks=[];let rec;
+  try{rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4500000})}
+  catch(e){rendering=false;$('animaticBtn').disabled=false;setStatus('Recorder unavailable: '+e.message);return}
+  rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  const done=new Promise(resolve=>{rec.onstop=resolve});
+  const photos=new Map();
+  for(const s of state.scenes){const url=refUrls.get(s.id);if(url){try{const img=new Image();img.src=url;await img.decode();photos.set(s.id,img)}catch(_){}}}
+  const wrap=(str,maxWidth,maxLines)=>{
+   const words=String(str||'').split(/\s+/),lines=[];let line='';
+   for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>maxWidth&&line){lines.push(line);line=word;if(lines.length>=maxLines)break}else line=next}
+   if(lines.length<maxLines&&line)lines.push(line);return lines;
+  };
+  function frame(s,t,index){
+   const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,'#164a58');g.addColorStop(.58,'#10223e');g.addColorStop(1,'#31284c');
+   ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+   const img=photos.get(s.id);
+   if(img){const sc=Math.max(W/img.width,H/img.height)*1.06;const iw=img.width*sc,ih=img.height*sc;const pan=t*16;ctx.globalAlpha=.72;ctx.drawImage(img,(W-iw)/2-pan,(H-ih)/2,iw,ih);ctx.globalAlpha=1;}
+   ctx.fillStyle='rgba(6,13,30,.60)';ctx.fillRect(0,H*.47,W,H*.53);
+   ctx.fillStyle='#a7cfff';ctx.font='bold '+Math.round(W*.021)+'px sans-serif';ctx.fillText('MEERA CREATIVE STUDIO  •  SHOT '+String(index+1).padStart(2,'0'),W*.065,H*.62);
+   ctx.fillStyle='#ffffff';ctx.font='bold '+Math.round(W*.045)+'px sans-serif';
+   wrap(s.title,W*.87,3).forEach((line,i)=>ctx.fillText(line,W*.065,H*.72+i*W*.057));
+   ctx.fillStyle='#dcefff';ctx.font=Math.round(W*.022)+'px sans-serif';
+   wrap(s.action,W*.87,3).forEach((line,i)=>ctx.fillText(line,W*.065,H*.86+i*W*.029));
+   const progress=Math.min(1,t/Math.max(1,Number(s.duration)));ctx.fillStyle='#91c8ff';ctx.fillRect(0,H-8,W*progress,8);
+  }
+  try{
+   rec.start(350);
+   const sceneList=state.scenes.slice(0,30),total=sceneList.reduce((n,s)=>n+Math.min(10,Number(s.duration)||8),0);
+   const started=performance.now();let elapsed=0;
+   while(elapsed<total){
+    const raw=(performance.now()-started)/1000;elapsed=Math.min(raw,total);
+    let left=elapsed,index=0;
+    while(index<sceneList.length-1&&left>=Number(sceneList[index].duration)){left-=Number(sceneList[index].duration);index++}
+    frame(sceneList[index],left,index);
+    setStatus('Rendering storyboard • '+Math.round(elapsed)+' / '+total+' seconds');
+    await new Promise(resolve=>setTimeout(resolve,1000/fps));
+   }
+   frame(sceneList[sceneList.length-1],Number(sceneList[sceneList.length-1].duration),sceneList.length-1);
+   rec.stop();await done;
+   if(chunks.length){const blob=new Blob(chunks,{type:mime}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=filename()+'_storyboard.webm';a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);setStatus('Storyboard WebM exported. For cinematic AI footage, use Flow.')}
+   else setStatus('No video recorded. Use Chrome/Edge on desktop.');
+  }catch(e){try{if(rec.state!=='inactive')rec.stop()}catch(_){}setStatus('Storyboard export failed: '+e.message)}
+  finally{stream.getTracks().forEach(t=>t.stop());rendering=false;$('animaticBtn').disabled=false;}
+ }
+ $('animaticBtn').onclick=exportAnimatic;
+ renderAll();save();addChat('assistant','Welcome to your creative studio! I preloaded your Itashi rainforest world. Select a shot, edit the action and camera, then Copy Shot Prompt for Flow. Your project stays in this browser until exported.');
+})();
+</script>
+</body>
+</html>
