@@ -924,13 +924,13 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
               <label for="box">Box Number *</label>
               <div class="box-input-row">
                 <span id="boxPrefixBadge" class="form-box-prefix">NO PREFIX</span>
-                <input type="text" id="box" required readonly aria-readonly="true" inputmode="none" placeholder="Auto allocated" style="background:#e8edf4;font-weight:700;cursor:not-allowed">
+                <input type="text" id="box" required inputmode="numeric" autocomplete="off" placeholder="First box number (e.g. 32340)" pattern="[0-9]+" title="Enter only the numeric part of the Box Number">
               </div>
               <span id="boxPreview" class="sub">Final box number: 1234</span>
-              <div id="v12BoxStatus" class="v12-note">Automatic Unit-wise Box: local + LIVE suggestion. Not reserved across phones until server allocation is implemented.</div>
+              <div id="v12BoxStatus" class="v12-note">पहला Box Number आप तय करें। अगली Entries में इसी Series का अगला Number अपने आप आएगा (Server पर आरक्षित नहीं)।</div>
               <div class="v12-note" id="v12LocalBoxDiagnostic" aria-live="polite">To check duplicate history, enter a Box Number and press Check local box.</div>
               <button type="button" id="v12CheckLocalBox" class="btn btn-secondary" style="margin-top:7px">🔎 Check local box history (read only)</button>
-              <span class="sub">🔒 Box number is generated automatically for the selected machine/unit. Manual editing is disabled.</span>
+              <span class="sub">पहली Entry में Box Number खुद लिखें। हर सफल Local Save के बाद अगला Number अपने आप +1 आएगा। जरूरत हो तो Number बदल सकते हैं।</span>
               <span class="sub" style="color:#53637c">Workplace notice: the chosen production-entry fields and Save/Queue status may be shared with authorized admins after server connection. Passwords and other phone screens are never sent.</span>
             </div>
             <div id="adminPrefixGroup" class="form-group admin-prefix-entry-group hidden">
@@ -1275,7 +1275,7 @@ function boxDigits(value){return String(value==null?"":value).replace(/[^0-9]/g,
 function updateBoxPreview(){
   const prefix=getBoxPrefix(),digits=boxDigits($("box")&&$("box").value);
   if($("boxPrefixBadge"))$("boxPrefixBadge").textContent=prefix||"NO PREFIX";
-  if($("boxPreview")){const u=unitForMachine($("machine")&&$("machine").value);$("boxPreview").textContent="Box: "+(prefix+((digits)||"1234"))+(u?"  •  Unit "+u:"")}
+  if($("boxPreview")){const u=unitForMachine($("machine")&&$("machine").value);$("boxPreview").textContent=digits?"Box: "+prefix+digits+(u?"  •  Unit "+u:""):"पहला Box Number लिखें (उदाहरण: "+prefix+"32340)";}
 }
 function allMachines(){return Array.from({length:MACHINE_MAX-MACHINE_MIN+1},(_,i)=>i+MACHINE_MIN)}
 function normaliseMachines(value){
@@ -1546,7 +1546,15 @@ function updateProductControl(){
 async function selectMachine(number){
   const n=Number(number); if(!allowedMachines.includes(n))return;
   $("machine").value=String(n); $("machineSearch").value="Machine "+n; $("machineList").classList.remove("show");
-  window.__lastUnit=unitForMachine(n); if(!window.__boxManual){$("box").value=Math.max(101,getNextBox(window.__lastUnit));updateBoxPreview()}
+  const chosenUnit=unitForMachine(n);
+  // Preserve manually started series within one unit. Switching units must
+  // start a new manual series, never carry an A sequence into B (or vice versa).
+  if(window.__lastUnit&&window.__lastUnit!==chosenUnit){
+    $("box").value="";window.__boxManual=false;
+    const note=document.getElementById("v12BoxStatus");
+    if(note)note.textContent="Unit बदला गया: इस Unit का पहला Box Number खुद भरें।";
+  }
+  window.__lastUnit=chosenUnit;updateBoxPreview();
   v12MasterMode=false;clearProductSelection(true); syncRollTypeOptions();v12SyncProductMode();
   v12CheckServerBox(n).catch(()=>{});
 
@@ -1907,15 +1915,11 @@ async function v12CheckServerBox(machine){
     if(String(d.unit)!==unit||String(d.box)[0]!== (unit==="1"?"A":"B"))throw Error("Unit mismatch");
     const exact=String(d.box);
     v12BoxSource="SERVER SUGGESTION (not reserved)";
-    if(selectedMachineNumber()===m&&!window.__boxManual&&getBoxPrefix()===exact[0]){
-      // Never move backwards below the next box already queued on this device.
-      $("box").value=Math.max(Number(boxDigits($("box").value))||101,Number(boxDigits(exact))||101,getNextBox(unit));
-      updateBoxPreview();
-    }
-    if(note)note.textContent="🔒 Auto Box • LIVE suggests "+exact+" • selected "+getBoxPrefix()+boxDigits($("box").value)+" (not yet reserved across phones).";
+    // Inform only: never overwrite the operator's manually started sequence.
+    if(note)note.textContent="LIVE suggests "+exact+". आपने जो Box Series शुरू की है वह नहीं बदलेगी। दो Phones का Number टकरा सकता है; यह Server Reservation नहीं है.";
   }catch(e){
     v12BoxSource="LOCAL SUGGESTION (not reserved)";
-    if(note)note.textContent="⚠ LIVE Box lookup unavailable. Auto number is only a local suggestion; wait for LIVE before saving if multiple phones share a Unit.";
+    if(note)note.textContent="LIVE Box lookup अभी उपलब्ध नहीं। अपना पहला Box Number भरें; इसके बाद अगला नंबर +1 होगा। अलग Phones के बीच Duplicate जाँच सीमित है.";
   }
 }
 function getNextBox(unit){
@@ -1940,8 +1944,18 @@ function getNextBox(unit){
   return (u.length?u[0]:100)+1;
 }
 
-function resetForm(){
-  if(!$("date"))return;v12MasterMode=false;v12SyncProductMode(); window.__boxManual=false; $("date").value=localISODate();applyAutoShift(true); $("box").value=Math.max(101,getNextBox()); updateBoxPreview(); $("machine").value=""; $("machineSearch").value=""; clearProductSelection(true); syncRollTypeOptions(); $("rollCount").value=""; $("grossWeight").value=""; $("tareWeight").value="Auto"; $("netWeight").value="Auto"; hideStatus("formStatus");
+function resetForm(keepBox=false){
+  if(!$("date"))return;
+  const remembered=keepBox?boxDigits($("box").value):"";
+  v12MasterMode=false;v12SyncProductMode();
+  window.__boxManual=!!remembered;
+  if(!keepBox)window.__lastUnit="";
+  $("date").value=localISODate();applyAutoShift(true);
+  $("box").value=remembered;
+  $("machine").value="";$("machineSearch").value="";
+  updateBoxPreview();clearProductSelection(true);syncRollTypeOptions();
+  $("rollCount").value="";$("grossWeight").value="";
+  $("tareWeight").value="Auto";$("netWeight").value="Auto";hideStatus("formStatus");
 }
 function saveLocalBackup(row){
   try{const key=LOCAL_BACKUP_PREFIX+(currentUser&&currentUser.username||"unknown");const arr=JSON.parse(localStorage.getItem(key)||"[]");arr.push(row);if(arr.length>300)arr.splice(0,arr.length-300);localStorage.setItem(key,JSON.stringify(arr))}catch(e){}
@@ -2076,16 +2090,18 @@ function reliablePending(){return null} // Legacy UI replaced by the V9 queue.
 function v9PrepareNextForm(previousBox){
   // Keep today's date and shift only. Never inherit machine/product/roll type:
   // operator must choose machine and roll type explicitly for EVERY box.
-  const oldNumber=Number(String(previousBox||"").replace(/^[^0-9]*/,""))||100;
-  const next=Math.max(oldNumber+1,getNextBox());
-  window.__boxManual=false;
+  const oldNumber=Number(boxDigits(previousBox));
+  const next=Number.isSafeInteger(oldNumber)&&oldNumber>0?oldNumber+1:"";
+  // The next number is based on the operator's last locally saved Box,
+  // not a late server suggestion or unrelated phone's sequence.
+  window.__boxManual=!!next;
   $("machine").value="";$("machineSearch").value="";
   $("machineList").classList.remove("show");
   clearProductSelection(true);
   syncRollTypeOptions(); // blank, disabled until a new machine is chosen
   $("rollCount").value="";
   $("grossWeight").value="";
-  $("box").value=next;
+  $("box").value=String(next);
   updateBoxPreview();
   calcWeight();
   $("machineSearch").focus();
@@ -2495,7 +2511,11 @@ async function saveEntry(event){
     showStatus("formStatus","PRODUCT / VARIANT REQUIRED: select the exact Product Name including [S] or [Z] from the list. Nothing was queued.","err");
     $("prodSearch").focus();return;
   }
-  const digits=boxDigits($("box").value);if(!digits){showStatus("formStatus","Enter the numeric box number.","err");return}
+  const digits=boxDigits($("box").value);
+  if(!/^\d+$/.test(String($("box").value).trim())||!digits||!Number.isSafeInteger(Number(digits))||Number(digits)<1){
+    showStatus("formStatus","पहली Entry का सही Box Number केवल अंकों में डालें (जैसे 32340)। अभी Entry Queue नहीं हुई।","err");
+    $("box").focus();return;
+  }
   const finalBox=getBoxPrefix()+digits;
   const rollW=round3(num($("rollType").value,.38)),rolls=num($("rollCount").value),gross=round3(num($("grossWeight").value)),tare=round3(rollW*rolls),net=round3(Math.max(0,gross-tare));
   // Safety gate before durable local queue: reject missing/implausible weights.
@@ -2875,7 +2895,7 @@ document.addEventListener("DOMContentLoaded",async()=>{
     el.textContent=match.length?box+" found in LOCAL IndexedDB: "+match.map(r=>r.state+" / Request ID …"+String(r.requestId).slice(-8)).join("; ")+". This is local history, not a live Sheet lookup. Do not clear pending records.":box+" not in this browser's local queue. Server may still reject a duplicate; inspect the server response.";
   });
   $("v12AddProduct").addEventListener("click",()=>v12SetMasterMode(true));$("v12BackPlanning").addEventListener("click",()=>v12SetMasterMode(false));
-  $("resetButton").addEventListener("click",resetForm);$("box").addEventListener("input",()=>{updateBoxPreview()});$("adminBoxPrefix").addEventListener("change",()=>{$("box").value=Math.max(101,getNextBox());updateBoxPreview()});$("rollType").addEventListener("change",calcWeight);$("rollCount").addEventListener("input",calcWeight);$("grossWeight").addEventListener("input",calcWeight);
+  $("resetButton").addEventListener("click",()=>resetForm(true));$("box").addEventListener("input",()=>{window.__boxManual=!!boxDigits($("box").value);updateBoxPreview()});$("adminBoxPrefix").addEventListener("change",()=>{$("box").value="";window.__boxManual=false;updateBoxPreview();});$("rollType").addEventListener("change",calcWeight);$("rollCount").addEventListener("input",calcWeight);$("grossWeight").addEventListener("input",calcWeight);
   $("machineSearch").addEventListener("input",filterMachineResults);$("machineSearch").addEventListener("focus",showMachineResults);$("machineSearch").addEventListener("blur",hideMachineResults);
   $("prodSearch").addEventListener("input",filterProductResults);$("prodSearch").addEventListener("focus",showProductResults);$("prodSearch").addEventListener("blur",hideProductResults);
   ["fFrom","fTo","fProd","fYarn","fSearch"].forEach(id=>$(id).addEventListener("input",renderEntryTables));$("clearFiltersButton").addEventListener("click",clearFilters);
