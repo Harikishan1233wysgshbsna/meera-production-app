@@ -2672,11 +2672,11 @@ async function meeraRecoveryStatus(ids){
 }
 async function meeraRecoveryVerifyBatch(batch,waitForPost=false){
   const found=new Map();
-  for(let attempt=0;attempt<(waitForPost?4:1);attempt++){
+  for(let attempt=0;attempt<(waitForPost?2:1);attempt++){
     const statuses=await meeraRecoveryStatus(batch.map(r=>r.requestId));
     for(const item of statuses)found.set(String(item.requestId),item);
     if(batch.every(r=>{const v=found.get(r.requestId);return v&&v.status!=='NOT_FOUND'&&v.status!=='BACKUP_PENDING'}))break;
-    if(waitForPost && attempt<3)await new Promise(resolve=>setTimeout(resolve,2500));
+    if(waitForPost && attempt<1)await new Promise(resolve=>setTimeout(resolve,1200));
   }
   let confirmed=0,unverified=0;
   for(const row of batch){
