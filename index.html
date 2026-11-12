@@ -3521,7 +3521,9 @@ document.addEventListener('click',function(e){if(e.target?.closest?.('[data-view
   return {requestId:clean(e.requestId,100),stage:clean(e.state,30),
    box:clean(e.box,40),unit:clean(p.unit,5),machine:clean(p.machine,10),date:clean(p.date,20),
    shift:clean(p.shift,20),product:clean(p.productName),yarn:clean(p.yarnCode),
-   rolls:clean(p.rollCount,20),gross:clean(p.grossW,30),tare:clean(p.tapeW,30),net:clean(p.netW,30)};
+   rolls:clean(p.rollCount,20),gross:clean(p.grossW,30),tare:clean(p.tapeW,30),net:clean(p.netW,30),
+   rollTypeCode:clean(p.rollTypeCode,10),rollType:clean(p.rollType,20),
+   productSource:clean(p.productSource,30),timestamp:clean(p.timestamp,40)};
  }
  async function submit(items){
   if(!online()||!ready||!Array.isArray(items)||!items.length)return;
