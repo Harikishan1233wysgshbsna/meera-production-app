@@ -96,6 +96,18 @@ function meeraMonitorPrepare_(item,username) {
     tare:meeraMonitorText_(item.tare,25),
     net:meeraMonitorText_(item.net,25)
   };
+  // Reconstructable production fields for authorized Admin backup export.
+  // NEVER include session token, password or arbitrary browser storage.
+  if (req) record.entryPayload={
+    action:'saveEntry',requestId:req,date:record.date,box:record.box,
+    machine:record.machine,unit:record.unit,shift:record.shift,
+    productName:record.product,yarnCode:record.yarn,rollCount:record.rolls,
+    grossW:record.gross,tapeW:record.tare,netW:record.net,
+    rollTypeCode:meeraMonitorText_(item.rollTypeCode,10),
+    rollType:meeraMonitorText_(item.rollType,20),
+    productSource:meeraMonitorText_(item.productSource,30),
+    timestamp:meeraMonitorText_(item.timestamp,40)
+  };
   const now=new Date().toISOString();
   return [key,record.username,record.unit,record.box,record.machine,
     record.date,record.shift,record.product,record.yarn,record.rolls,
@@ -143,7 +155,8 @@ function meeraMonitorRead_(p) {
     product:String(r[7]||''),yarn:String(r[8]||''),
     rolls:String(r[9]||''),gross:String(r[10]||''),tare:String(r[11]||''),
     net:String(r[12]||''),stage:String(r[13]||''),updatedAt:String(r[14]||''),
-    requestId:String(r[15]||'')
+    requestId:String(r[15]||''),
+    recoveryPayload:(function(){try{return JSON.parse(String(r[16]||'{}')).entryPayload||null}catch(_){return null}})()
   })).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
   return {ok:true,monitorVersion:MEERA_MONITOR_VERSION_,items,totalRecords:last-1};
 }
