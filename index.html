@@ -2711,7 +2711,7 @@ async function meeraRecoverySyncAll(){
       const first=await meeraRecoveryVerifyBatch(batch);
       confirmed+=first.confirmed;
       const remaining=[];
-      for(const r of batch){const x=(await meeraRecoveryTx('readonly',(s,set)=>{s.get(r.key).onsuccess=e=>set(e.target.result)}));if(x.verification!=='CONFIRMED' && x.verification==='NOT_FOUND')remaining.push(r)}
+      for(const r of batch){const x=(await meeraRecoveryTx('readonly',(s,set)=>{s.get(r.key).onsuccess=e=>set(e.target.result)}));if(x.verification==='NOT_FOUND' || x.verification==='BACKUP_PENDING')remaining.push(r)}
       if(remaining.length){
         meeraRecoverySay('Uploading batch '+(Math.floor(index/25)+1)+' of '+Math.ceil(pending.length/25)+' ('+remaining.length+' entries)…');
         // The POST is opaque: a successful fetch is NOT a confirmed save.
