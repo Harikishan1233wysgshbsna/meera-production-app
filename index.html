@@ -2765,9 +2765,9 @@ async function meeraClearOldLocalData(){
   if(v9WorkerBusy||v9LocalBusy||meeraRecoveryBusy)throw Error('Sync or entry save is running. Try again when it stops.');
   if(!v9Db||!v9StorageReady)throw Error('Local queue storage is not ready.');
   const owner=v9Owner();
-  if(!confirm('PERMANENT LOCAL CLEAR for '+owner+' on THIS browser only. Your old entries may still be missing from LIVE. Confirm you have exported the backup to a different device. Continue?'))return;
+  if(!confirm('PERMANENT LOCAL CLEAR for '+owner+' on THIS browser only. Your old entries may still be missing from LIVE. Confirm you have exported the backup to a different device. Continue?'))return 'Clear cancelled. No local entries deleted.';
   const typed=prompt('To clear old browser records, type exactly: CLEAR '+owner);
-  if(typed!=='CLEAR '+owner){meeraRecoverySay('Clear cancelled. No records deleted.');return}
+  if(typed!=='CLEAR '+owner){meeraRecoverySay('Clear cancelled. No records deleted.');return 'Clear cancelled. No local entries deleted.';}
   if(!await v9Lease(false,owner))throw Error('Another browser tab is syncing. Close other tabs first.');
   v9WorkerBusy=true;
   const btn=document.getElementById('v9ClearOldLocal');
@@ -2795,6 +2795,7 @@ async function meeraClearOldLocalData(){
     const message='✅ OLD LOCAL PAYLOAD CLEARED for '+owner+': '+queueDeleted+' queue records + '+recoveryDeleted+' recovery records removed. Remaining: 0. LIVE Sheet and saved off-phone backup unchanged. New entries can start.';
     meeraRecoverySay(message);
     showStatus('formStatus',message,'ok');
+    return message;
   }finally{
     v9WorkerBusy=false;
     if(btn)btn.disabled=false;
@@ -3343,6 +3344,17 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
  async function sendAI(prompt){
    if(busy)return;const text=safeValue(prompt).trim();if(!text)return;
    byId('meeraAiInput').value='';addMessage('user',text);
+   // Local, explicit operator command. Never send a destructive command to AI.
+   // Clear requires the existing two confirmations, and touches this user's browser only.
+   if(/^clear[\\s_-]+old[\\s_-]+(?:bro|browser|payload|data)$/i.test(text)){
+     try{
+       const result=await meeraClearOldLocalData();
+       addMessage('ai',result||'Clear cancelled. Old local entries were not deleted.','Local action');
+     }catch(error){
+       addMessage('ai','Clear not completed: '+String(error&&error.message||error),'Local action');
+     }
+     return;
+   }
    const local=await localReply(text);
    if(local){addMessage('ai',local,'On-device guide');lastAnswer=local;speakAnswer(local);return;}
    if(!sessionVerified){addMessage('ai','Internet/Login Server verification उपलब्ध नहीं है। AI को Google Sheet से उत्तर देने के लिए Online Login चाहिए।');return;}
