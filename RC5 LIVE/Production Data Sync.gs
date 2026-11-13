@@ -1,3 +1,9 @@
+/* RC5 LIVE WORKING-COPY SAFETY PATCH — 2026-11-13
+ * GitHub-only source review: this is not the current deployed LIVE Apps Script.
+ * Request IDs and box identities now have whole-sheet server-side exact checks.
+ * Recovery only confirms matching owner/machine/box. Test performance under
+ * concurrent load and deploy in TEST before considering LIVE.
+ */
 /*
  * V101 LIVE-CONFIGURED CANDIDATE — NOT VERIFIED OR DEPLOYED.
  * Created 2026-11-11 from user-supplied LIVE V100 backend.
@@ -1319,6 +1325,21 @@ function meeraFastFindRows_(sheet,column,value,tailStart,tailRows,arrayIndex) {
   });
   return out;
 }
+/* RC5 REVIEW PATCH — exact, global identity check without loading all rows.
+ * A recent-15 cache is only a speed hint, NEVER sufficient proof that an
+ * older box/Request ID does not exist. TextFinder runs server-side. */
+function meeraRC5ExactIdentityRows_(sheet, column, value) {
+  var key=String(value==null?'':value).trim();
+  if (!key || sheet.getLastRow()<2) return [];
+  var range=sheet.getRange(2,column,sheet.getLastRow()-1,1);
+  var found=range.createTextFinder(key).matchEntireCell(true).matchCase(false).findAll();
+  return found.map(function(cell){return cell.getRow();});
+}
+function meeraRC5IncludeCandidateRows_(candidates, sheet, idColumn, boxColumn, requestId, box) {
+  meeraRC5ExactIdentityRows_(sheet,idColumn,requestId).forEach(function(n){candidates[n]=true;});
+  meeraRC5ExactIdentityRows_(sheet,boxColumn,box).forEach(function(n){candidates[n]=true;});
+}
+
 function meeraFastProductionIndex_(requestId,box,user,unit) {
   var sheet=getSpreadsheet_().getSheetByName(CONFIG.ENTRY_SHEET_NAME);
   if (!sheet) throw new Error('Production sheet missing.');
@@ -1338,10 +1359,17 @@ function meeraFastProductionIndex_(requestId,box,user,unit) {
     var start=Math.max(2,last-14);
     for(var n=start;n<=last;n++) candidates[n]=true;
   }
+  // Check ALL historic matching identities; recent-15 alone is not safe.
+  meeraRC5IncludeCandidateRows_(candidates,sheet,MEERA_COL_REQID_+1,boxIndex+1,requestId,box);
+  var exactIdRows=meeraRC5ExactIdentityRows_(sheet,MEERA_COL_REQID_+1,requestId);
+  var exactBoxRows=meeraRC5ExactIdentityRows_(sheet,boxIndex+1,box);
+  var exactCandidates={};
+  exactIdRows.concat(exactBoxRows).forEach(function(n){exactCandidates[n]=true;});
   Object.keys(candidates).forEach(function(k){
     var n=Number(k), r=sheet.getRange(n,1,1,width).getDisplayValues()[0];
-    // For user/unit index, only those owner's entries count towards its 15-box window.
-    if (user && (String(r[MEERA_COL_ENTERED_]||'').trim().toLowerCase()!==String(user.username||'').toLowerCase() || Number(r[MEERA_COL_UNIT_])!==Number(unit))) return;
+    // Never hide a global ID/box conflict belonging to another operator/unit.
+    var exactMatch=!!exactCandidates[n];
+    if (user && !exactMatch && (String(r[MEERA_COL_ENTERED_]||'').trim().toLowerCase()!==String(user.username||'').toLowerCase() || Number(r[MEERA_COL_UNIT_])!==Number(unit))) return;
     var rid=String(r[MEERA_COL_REQID_]||'').trim(), b=cleanBox_(r[boxIndex]).toUpperCase();
     if (rid) { (byId[rid]=byId[rid]||[]).push(n);idOf[n]=rid; }
     if (b) { (byBox[b]=byBox[b]||[]).push(n);boxOf[n]=b; }
@@ -1357,9 +1385,16 @@ function meeraFastBackupIndex_(backup,requestId,box,user,unit) {
     var start=Math.max(2,last-14);
     for(var n=start;n<=last;n++) candidates[n]=true;
   }
+  // Backup also must detect identities older than the 15-row cache.
+  meeraRC5IncludeCandidateRows_(candidates,backup,1,3,requestId,box);
+  var exactIdRows=meeraRC5ExactIdentityRows_(backup,1,requestId);
+  var exactBoxRows=meeraRC5ExactIdentityRows_(backup,3,box);
+  var exactCandidates={};
+  exactIdRows.concat(exactBoxRows).forEach(function(n){exactCandidates[n]=true;});
   Object.keys(candidates).forEach(function(k){
     var n=Number(k),r=backup.getRange(n,1,1,7).getDisplayValues()[0];
-    if (user && (String(r[5]||'').trim().toLowerCase()!==String(user.username||'').toLowerCase() || Number(r[4])!==Number(unit))) return;
+    var exactMatch=!!exactCandidates[n];
+    if (user && !exactMatch && (String(r[5]||'').trim().toLowerCase()!==String(user.username||'').toLowerCase() || Number(r[4])!==Number(unit))) return;
     var rid=String(r[0]||'').trim(),b=cleanBox_(r[2]).toUpperCase();
     if (rid) {(byId[rid]=byId[rid]||[]).push(n);rowOf[rid]=n;}
     if (b) (byBox[b]=byBox[b]||[]).push(n);
@@ -3006,8 +3041,26 @@ function meeraReconcileAllPending(options) {
       if (meeraIsTombstoned_(ss,'PRODUCTION DATA',requestId,box)) {
         summary.review++; summary.details.push({ requestId, box, result:'TOMBSTONED' }); continue;
       }
-      if ((prod.byId[requestId]||[]).length === 1) {
-        meeraFixConfirmBackup_(backup, { rowOf:{}, statusOf:{} }, requestId, i + 2);
+      // Never confirm a backup against an unrelated production row or a
+      // duplicated historic ID/box. Preserve all ambiguous rows for review.
+      const existingById=prod.byId[requestId]||[];
+      const existingByBox=prod.byBox[box]||[];
+      if (existingById.length>1 || existingByBox.length>1 ||
+          (existingByBox.length===1 && (existingById.length!==1 || existingByBox[0]!==existingById[0]))) {
+        summary.review++; summary.details.push({requestId,box,result:'IDENTITY_CONFLICT'}); continue;
+      }
+      if (existingById.length===1) {
+        const foundRow=existingById[0];
+        if (prod.boxOf[foundRow]!==box) {
+          summary.review++; summary.details.push({requestId,box,result:'BACKUP_BOX_MISMATCH'}); continue;
+        }
+        const existing=prod.sheet.getRange(foundRow,1,1,prod.width).getDisplayValues()[0];
+        const mCol=findHeader_(prod.names,['m/c no','m/c','machine no','machine','mc no']);
+        if (mCol<0 || Number(existing[mCol])!==Number(values[i][3]) ||
+            String(existing[MEERA_COL_ENTERED_]||'').trim().toLowerCase()!==String(values[i][5]||'').trim().toLowerCase()) {
+          summary.review++; summary.details.push({requestId,box,result:'BACKUP_OWNER_MACHINE_MISMATCH'}); continue;
+        }
+        meeraFixConfirmBackup_(backup, { rowOf:{}, statusOf:{} }, requestId, i+2);
         summary.confirmed++; summary.details.push({ requestId, box, result:'FLAG_REPAIRED' }); continue;
       }
       const data = JSON.parse(values[i][7]);
