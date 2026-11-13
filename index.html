@@ -3306,6 +3306,13 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
 </script>
 
 
+
+<style id="meera-ai-admin-only">
+/* MEERA AI is an admin-only UI; regular users never see its FAB, chat or home link. */
+body:has(#appShell:not(.hidden)) #meeraAiRoot.hidden{display:none!important}
+#meeraAiRoot.hidden, #meeraAiRoot.hidden *{visibility:hidden!important;pointer-events:none!important}
+</style>
+
 <!-- MEERA AI TEST V11: Browser UI only; server access requires the separate AI backend. -->
 <div id="meeraAiRoot" class="hidden" aria-label="MEERA AI assistant">
   <div id="meeraAiDimmer" class="meera-ai-dimmer" hidden></div>
@@ -3352,12 +3359,14 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
    sourceFiles.unshift({name:'Current TEST HTML scripts',content:own});
  }
  function syncVisibility(){
-   const logged=isLoggedIn();if(logged)primeOwnSource();root.classList.toggle('hidden',!logged);
+   const logged=isLoggedIn()&&isAdminAi();if(logged)primeOwnSource();root.classList.toggle('hidden',!logged);
    if(!logged){pane.hidden=true;byId('meeraAiDimmer').hidden=true;}
    byId('meeraAiAdminSource').hidden=!logged||!isAdminAi();
    ensureHomeLink();
  }
  function ensureHomeLink(){
+   const existing=document.querySelector('[data-ai-home]');
+   if(!isLoggedIn()||!isAdminAi()){if(existing)existing.remove();return;}
    const links=document.querySelector('#view-home .v10-home-links');if(!links||links.querySelector('[data-ai-home]'))return;
    const b=document.createElement('button');b.type='button';b.className='v10-home-link meera-ai-home-button';b.dataset.aiHome='1';
    const l=document.createElement('span');l.className='meera-ai-home-logo';l.setAttribute('aria-hidden','true');
@@ -3371,7 +3380,7 @@ document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.view==="material")t.a
    if(tag){const cap=document.createElement('span');cap.className='meera-ai-caption';cap.textContent=tag;box.appendChild(cap);}
    messages.appendChild(box);messages.scrollTop=messages.scrollHeight;return box;
  }
- function openChat(){if(!isLoggedIn())return;
+ function openChat(){if(!isLoggedIn()||!isAdminAi())return;
    pane.hidden=false;byId('meeraAiDimmer').hidden=true;
    if(!messages.children.length)addMessage('ai','नमस्ते! मैं MEERA AI हूँ। मैं Queue, Save और Duplicate की मदद कर सकता हूँ। Google Sheet के verified आँकड़ों और गहरी Code Analysis के लिए अलग AI Backend connect करना होगा।','Assistant');
    setTimeout(()=>byId('meeraAiInput').focus(),40);checkLocalQueue().catch(()=>{});
