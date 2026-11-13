@@ -1,21 +1,56 @@
-RC7 LIVE DIRECT SAVE — INSTALLATION GUIDE
+RC7 SINGLE-FILE PRODUCTION DATA SYNC — REPLACEMENT PROCEDURE
+===========================================================
 
-1. KEEP the old PRODUCTION BACKUP sheet and all old pending entries. DO NOT DELETE.
-2. Back up the Apps Script project and production spreadsheet, and record deployment Version 109 for rollback.
-3. Add a new Apps Script file named RC7_DirectSave.gs with the complete code in this folder.
-4. In the EXISTING Production Data Sync.gs, replace ONLY these two dispatch statements:
-    * GET route near start of routeGet_(p): return saveEntry_(body);
-      CHANGE TO: return meeraRC7DirectSave_(body);
-    * POST routePost_(body) 'saveEntry' case: return saveEntry_(body);
-      CHANGE TO: return meeraRC7DirectSave_(body);
-5. In the EXISTING routeGet_(p) switch change the checkSaveStatus case to:
-      case 'checkSaveStatus':
-        return meeraRC7DirectStatus_(p);
-   Keep the existing rc6ProductionProof route unchanged.
-6. Search project-wide for function meeraRC7DirectSave_ and function meeraRC7DirectStatus_; each should have exactly one definition.
-7. SAVE then deploy a NEW VERSION of the SAME deployment (same /exec URL). Re-test with an authorized entry using its Request ID.
-8. The existing LIVE GitHub index.html still sends action=saveEntry, so these route changes activate Direct Save without a frontend endpoint change.
-9. DANGER: Apps Script GET action=saveEntry already exists for legacy compatibility. Do not expose API tokens or use unauthenticated endpoints.
-10. On issues: revert same deployment to Version 109 and leave IndexedDB data untouched. Reconcile pending Request IDs before any retries.
+SOURCE (one .gs file only):
+RC7 LIVE/Production Data Sync.gs
 
-Current LIVE GitHub index.html uses rc6ProductionProof to remove Production-verified entries from upload pending while preserving original local payload. When RC7 DirectStatus is deployed, full confirmation will no longer depend on Backup.
+What is included:
+- GitHub RC5 LIVE/Production Data Sync.gs as the BASE snapshot
+- Existing RC5 recovery and admin helper functions from the GitHub RC5 LIVE directory
+- Direct Production save (RC7), exact Request ID status and batched status
+- No dependency on RC6_ProductionProof.gs or RC7_DirectSave.gs after migration
+- Original backup sheet and older recovery functions preserved
+
+CRITICAL — READ BEFORE REPLACING LIVE CODE
+1. Export/back up the CURRENT live Apps Script project and spreadsheet.
+2. Compare the current LIVE editor with the RC5 GitHub BASE snapshot.
+   The GitHub snapshot is NOT an automatic copy of every recent live edit.
+   If additional live-only functions exist, merge them into the consolidated
+   file before replacing the live code. Do NOT discard them.
+3. In the existing LIVE Apps Script project, keep ONLY ONE DEFINITION of each
+   function. The consolidated .gs includes the known RC5 support functions.
+   After backing up, remove/disable duplicate legacy .gs files, including
+   RC6_ProductionProof.gs and RC7_DirectSave.gs, and the merged RC5 helpers.
+   NEVER delete an unreviewed script that contains live-only functions.
+   Keep the appsscript.json manifest and any required HTML project files.
+4. Replace the contents of the LIVE 'Production Data Sync' Script file with
+   the reviewed consolidated source. Save and check for syntax errors.
+5. Deploy NEW VERSION of the SAME existing Web App deployment to preserve URL.
+   GitHub HTML was updated already, but it only uses RC7 fast batch status
+   after the new Apps Script deployment becomes active.
+6. One authorized test entry: record Request ID, time, Production row and HTML
+   VERIFIED time. Verify no extra PRODUCTION BACKUP row for a new entry.
+7. Never clear browser IndexedDB/localStorage; it can hold unsynced entries.
+8. If any issue occurs, roll back the deployment to the PRIOR version and keep
+   the entire queue intact. Resolve pending Request IDs before retry.
+
+NEW ROUTES
+GET checkSaveStatus           -> meeraRC7DirectStatus_ (Production only)
+GET checkSaveStatusBatch      -> meeraRC7DirectStatusBatch_ (up to 12)
+GET saveEntry (legacy)        -> meeraRC7DirectSave_
+POST saveEntry                -> meeraRC7DirectSave_
+
+VERIFIED BEHAVIOR (CODE-LEVEL SIMULATION ONLY)
+- First Request ID creates one Production row.
+- Retrying the same Request ID returns previously confirmed row.
+- Different Request ID with same box adds a DUPLICATE-flagged row.
+- A matching ID+box+machine+authenticated username gives CONFIRMED.
+- Wrong box/machine/username gives REVIEW_REQUIRED, missing ID NOT_FOUND.
+- HTML JS syntax and consolidated backend JS syntax checked.
+The above were mock tests, NOT real-device speed tests.
+
+NOTE
+Direct API POST from GitHub Pages currently uses mode:no-cors, so the browser
+cannot read POST response itself. HTML polls an authenticated read-only status
+endpoint in a small batch; it NEVER marks a box SAVED without confirmation.
+A 2-second Production write does not guarantee a 2-second UI confirmation.
