@@ -870,7 +870,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
       <div class="stat-box"><h3 id="sTare">0.000</h3><span>Total Tare (kg)</span></div>
       <div class="stat-box"><h3 id="sNet">0.000</h3><span>Total Net (kg)</span></div>
     </div>
-<section id="v102DailyBoard" class="card v102-dash" aria-label="Today unit production dashboard"><h2>📊 Today's Unit Production <span id="v102DayTitle" class="helper"></span></h2><div class="v102-kpis"><div><strong id="v102TotalEntries">0</strong><span>Total Boxes</span></div><div><strong id="v102TotalNet">0.000</strong><span>Net Weight (kg)</span></div><div><strong id="v102TotalRolls">0</strong><span>Total Rolls</span></div></div><div class="table-wrap"><table class="v102-table"><thead><tr><th>User</th><th>Unit</th><th>Shift</th><th>Boxes</th><th>Net kg</th><th>Rolls</th></tr></thead><tbody id="v102UserRows"><tr><td colspan="6">Loading today's production…</td></tr></tbody></table></div><p class="sub" id="v102DashboardNote">Only server-confirmed production entries are counted. Local pending queue is excluded.</p></section>
+<section id="v102DailyBoard" class="card v102-dash" aria-label="Today unit production dashboard"><h2>📊 Today's Unit Production <span id="v102DayTitle" class="helper"></span></h2><div class="v102-kpis"><div><strong id="v102TotalEntries">0</strong><span>Total Boxes</span></div><div><strong id="v102TotalNet">0.000</strong><span>Net Weight (kg)</span></div><div><strong id="v102TotalRolls">0</strong><span>Total Rolls</span></div><div><strong id="rc5MyDuplicateBoxes">—</strong><span>My Duplicate Boxes Today</span></div></div><div class="table-wrap"><table class="v102-table"><thead><tr><th>User</th><th>Unit</th><th>Shift</th><th>Boxes</th><th>Net kg</th><th>Rolls</th></tr></thead><tbody id="v102UserRows"><tr><td colspan="6">Loading today's production…</td></tr></tbody></table></div><p class="sub" id="v102DashboardNote">Only server-confirmed production entries are counted. Local pending queue is excluded.</p></section>
       <div class="card v9-card" id="v9QueuePanel">
         <h2>⚡ V10 Local Order & Fast Entry Queue <span class="helper">Local to this browser and logged-in user</span></h2>
         <div class="v9-summary-row">
@@ -1808,10 +1808,28 @@ async function v1022LoadAdminHistory(){
     if(btn)btn.textContent='📚 Retry Full History (Admin)';
   }finally{if(btn)btn.disabled=false;}
 }
+/* RC5: count authenticated production DUPLICATE statuses, not local audit. */
+async function rc5RefreshMyDuplicateBoxes(){
+  const target=document.getElementById("rc5MyDuplicateBoxes");
+  if(!target || !sessionToken)return;
+  target.textContent="…";
+  target.title="Checking LIVE Production status";
+  try {
+    const result=await apiGet("myDuplicateBoxesToday",{token:sessionToken});
+    if(!result || !result.ok || typeof result.count!=="number")throw new Error(result&&result.error||"Count unavailable");
+    target.textContent=(result.complete?"":"≥")+String(result.count);
+    target.title=(result.complete?"":"At least ") + result.count + " duplicate boxes today for your account" + (result.boxes&&result.boxes.length ? " • "+result.boxes.join(", ") : "");
+  }catch(e){
+    target.textContent="—";
+    target.title="Duplicate count unavailable: "+String(e&&e.message||e);
+  }
+}
+
 async function loadEntries(){
   const note=document.getElementById("v102DashboardNote"), body=document.getElementById("v102UserRows");
   if(note) note.textContent="Loading today's confirmed production from LIVE server…";
   if(body) body.innerHTML='<tr><td colspan="6">Loading LIVE unit data…</td></tr>';
+  rc5RefreshMyDuplicateBoxes();
   try{
     const result=await apiGet("unitTodayEntries",{token:sessionToken});
     if(!result||!result.ok)throw new Error(result&&result.error?result.error:"Dashboard API returned an error");
