@@ -2228,16 +2228,21 @@ function v9ObserveQueuePanel(){
     check();
   }
 }
-function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
+function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",PRODUCTION_SAVED:"Production saved — Backup pending",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
 function v9StatusClass(state){return state==="SAVED"?"ok":state==="DUPLICATE"||state==="REVIEW_REQUIRED"?"err":"info"}
 async function v9RefreshUi(){
   if(!currentUser||!v9Db)return;
   const owner=v9Owner(),rows=await v9GetAll(owner);
   if(v9Owner()!==owner)return;
   v9KnownBoxes=new Set(rows.map(r=>r.box));
-  const waiting=rows.filter(v9IsActive),verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
+  // Upload pending excludes rows with exact server-side Production proof.
+  // Keep PRODUCTION_SAVED rows in IndexedDB (full payload) until BACKUP confirmed.
+  const waiting=rows.filter(r=>v9IsActive(r)&&r.state!=="PRODUCTION_SAVED"),
+        prodSaved=rows.filter(r=>r.state==="PRODUCTION_SAVED"),
+        verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER").length,
+        rejected=rows.filter(r=>r.state==="DUPLICATE").length;
   v9LastCount=waiting.length;
-  rc6UnverifiedCount=waiting.length+rows.filter(r=>r.state==="ON_SERVER").length;
+  rc6UnverifiedCount=waiting.length+prodSaved.length+rows.filter(r=>r.state==="ON_SERVER").length;
   rc6ReviewCount=waiting.filter(r=>r.state==="REVIEW_REQUIRED").length+rows.filter(r=>r.state==="ON_SERVER").length;
   const rc6Banner=document.getElementById("rc6QueueSafetyBanner");
   const rc6Count=document.getElementById("rc6PendingCount");
@@ -2248,7 +2253,7 @@ async function v9RefreshUi(){
     if(rc6Count)rc6Count.textContent=String(rc6UnverifiedCount);
     if(rc6Review)rc6Review.textContent=String(rc6ReviewCount);
     if(rc6Status)rc6Status.textContent=rc6UnverifiedCount
-      ? "These entries are NOT fully server-confirmed. Keep this tab OPEN with internet ON until Pending = 0; export a backup if you must stop."
+      ? "Upload pending: "+waiting.length+"; Production saved / Backup pending: "+prodSaved.length+". Keep this tab OPEN until both are zero or export a local backup."
       : "All entries in this browser are server-confirmed.";
   }
   $("v9QueuedCount").textContent=waiting.length;
@@ -2257,18 +2262,20 @@ async function v9RefreshUi(){
   const status=$("v9QueueSummary");
   status.textContent=waiting.some(r=>r.state==="REVIEW_REQUIRED")?
     "⚠ ADMIN REVIEW needed. Other distinct boxes can continue syncing; this box stays on hold.":
-    waiting.length?"Local queue is safe on this browser profile. Server verification runs in the background; keep the browser open when possible.":
+    waiting.length||prodSaved.length?"Upload pending: "+waiting.length+"; Production saved / Backup pending: "+prodSaved.length+". Local data is retained until fully verified.":
     "No unverified entries in this browser. The server is the authority for saved entries.";
   const now=Date.now();
   v9ScheduleArchiveRefresh(rows,now);
   // The local audit is permanent; only filter what is DISPLAYED here.
   // Show ALL unresolved records before resolved ones, so a full history
   // cannot push active or admin-review boxes out of the 35-row view.
-  const unfinished=rows.filter(v9IsActive).reverse();
+  const unfinished=rows.filter(r=>v9IsActive(r)&&r.state!=="PRODUCTION_SAVED").reverse();
+  // Show Production-saved boxes in a separate follow-up group, not the upload pending list.
+  const backupWaiting=rows.filter(r=>r.state==="PRODUCTION_SAVED").reverse();
   const recentFinal=rows.filter(r=>V9_FINAL_STATES.has(r.state)&&!v9ShouldHideResolved(r,now)).reverse();
   // Every unresolved item stays visible; at most 60 recent resolved audit
   // items are displayed before their animation/30-minute cleanup.
-  const visible=unfinished.concat(recentFinal.slice(0,60));
+  const visible=unfinished.concat(backupWaiting,recentFinal.slice(0,60));
   $("v9QueueBody").innerHTML=visible.length?visible.map(row=>{
     const suffix=String(row.requestId).slice(-8),warning=row.lastError?'<div class="v9-error">'+escapeHtml(String(row.lastError).slice(0,130))+'</div>':"";
     const action=!V9_FINAL_STATES.has(row.state)?'<button type="button" class="v9-mini" data-v9-action="check" data-v9-id="'+escapeHtml(row.requestId)+'">Check only</button>':"";
@@ -2392,6 +2399,11 @@ async function v9ApplyStatus(row,status){
     }
     await v9Change(row.requestId,{state:"REVIEW_REQUIRED",nextCheckAt:0,lastError:"Server requires administrator review. No automatic retry."});return true;
   }
+  if(row.state==="PRODUCTION_SAVED"){
+    await v9Change(row.requestId,{state:"PRODUCTION_SAVED",nextCheckAt:0,
+      lastError:"Production row verified; waiting for Backup CONFIRMED ("+status+")."});
+    return false;
+  }
   await v9Change(row.requestId,{state:"PENDING",nextCheckAt:Date.now()+V9_RECHECK_MS,lastError:"Awaiting server confirmation ("+status+")"});
   return false;
 }
@@ -2487,8 +2499,34 @@ async function rc6ConfirmOne(){
     await Promise.allSettled(pair.map(async row=>{
       rc6ConfirmLast.set(row.requestId,Date.now());
       try{
+        // Prove Production append without waiting for BACKUP flag.
+        // An older server without this route returns Unknown request; preserve
+        // the original queue behavior until RC6 backend is deployed.
+        if(row.state!=="PRODUCTION_SAVED"){
+          let prod=null;
+          try{prod=await jsonp(buildUrl("rc6ProductionProof",{
+            token:sessionToken,requestId:row.requestId,box:row.box,machine:String(row.payload.machine)
+          }),16000);}catch(_){}
+          if(prod&&prod.ok===true&&prod.status==="PRODUCTION_SAVED" &&
+             prod.requestId===row.requestId&&String(prod.box).toUpperCase()===row.box&&
+             Number(prod.machine)===Number(row.payload.machine)){
+            const fresh=await v9Get(row.requestId);
+            if(fresh&&fresh.owner===owner&&v9IsActive(fresh)){
+              await v9Change(fresh.requestId,{state:"PRODUCTION_SAVED",nextCheckAt:0,
+                productionVerifiedAt:new Date().toISOString(),
+                lastError:"Exact Production row verified. Backup confirmation pending; payload retained."});
+            }
+          }else if(prod&&prod.ok===true&&prod.status==="REVIEW_REQUIRED"){
+            const fresh=await v9Get(row.requestId);
+            if(fresh&&fresh.owner===owner&&v9IsActive(fresh))
+              await v9Change(fresh.requestId,{state:"REVIEW_REQUIRED",
+                lastError:"Production identity mismatch. Admin review required; payload preserved."});
+            return;
+          }
+        }
+        // Full verification still needs BACKUP CONFIRMED; only then release payload.
         const status=await v9CheckStatus(row);
-        if(status==="NOT_FOUND" && row.lastPostedAt &&
+        if(status==="NOT_FOUND" && row.state!=="PRODUCTION_SAVED" && row.lastPostedAt &&
            Date.now()-row.lastPostedAt>=V9_RETRY_GRACE_MS){
           const fresh=await v9Get(row.requestId);
           if(fresh&&fresh.owner===owner&&v9IsActive(fresh)&&!fresh.retryAuthorized){
