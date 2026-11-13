@@ -802,7 +802,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
         <p>Mobile entry • Searchable fields • Machine access control</p>
       </div>
       <div class="header-actions">
-        <a href="./video-studio.html" target="_blank" rel="noopener noreferrer" style="border:1px solid #637da8;color:#fff;background:#234779;padding:9px 12px;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px" title="Independent cinematic video studio — does not access Production Data">🎬 AI Video Studio</a>
+        <a id="meeraAdminVideoStudio" href="./video-studio.html" target="_blank" rel="noopener noreferrer" hidden style="border:1px solid #637da8;color:#fff;background:#234779;padding:9px 12px;border-radius:10px;text-decoration:none;font-weight:700;font-size:13px" title="Independent cinematic video studio — does not access Production Data">🎬 AI Video Studio</a>
         <span id="userBadge" class="user-badge">Not signed in</span>
         <button id="v10HeaderSettings" class="v10-settings-gear" type="button" title="Appearance settings" aria-label="Open settings">☰</button>
         <button id="logoutButton" class="logout-btn" type="button">Log out</button>
@@ -2455,7 +2455,42 @@ async function v102DecryptArchive(archive,pin){if(!archive||archive.format!=="ME
 function v102BackupViewer(archive){
   // An independent, offline-capable HTML file. It contains ciphertext only.
   const archiveText=JSON.stringify(archive).replace(/</g,"\\u003c");
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MEERA Locked Backup</title><style>body{margin:0;background:#edf3fd;font:16px system-ui,sans-serif;color:#122b55;display:grid;place-items:center;min-height:100vh;padding:16px;box-sizing:border-box}.card{max-width:480px;width:100%;box-sizing:border-box;background:white;padding:26px;border-radius:20px;box-shadow:0 12px 35px #0b1c3920}h1{font-size:23px}input,button{font:inherit;width:100%;padding:13px;margin:7px 0;box-sizing:border-box;border-radius:10px}input{border:2px solid #b6c6dc}button{background:#125be8;color:#fff;border:0;font-weight:800}#message{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><div class="card"><h1>🔒 MEERA Production Backup</h1><p>Enter the backup PIN to unlock this encrypted file.</p><form id="open"><input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Backup PIN" required><button>Unlock Backup</button></form><p id="message">Protected with AES-GCM encryption. Without the correct PIN, the entries remain encrypted.</p><button id="download" hidden>Download decrypted JSON</button></div><script id="meera-secure-payload" type="application/json">${archiveText}</scr`+`ipt><script>(function(){const a=JSON.parse(document.getElementById('meera-secure-payload').textContent),e=new TextEncoder(),d=new TextDecoder();const dec=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));let plain='';document.getElementById('open').onsubmit=async ev=>{ev.preventDefault();let pin=document.getElementById('pin').value;try{if(!crypto.subtle)throw Error('Open this file in a modern HTTPS-capable browser.');let base=await crypto.subtle.importKey('raw',e.encode(pin),'PBKDF2',false,['deriveKey']);let key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:dec(a.salt),iterations:250000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);plain=d.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:dec(a.iv)},key,dec(a.ciphertext)));let b=JSON.parse(plain);document.getElementById('message').textContent='Unlocked: '+b.entries.length+' entries for '+b.owner+'. You may export the decrypted JSON into a trusted location.';document.getElementById('download').hidden=false;}catch(x){plain='';document.getElementById('message').textContent='Wrong PIN or damaged file. '+(x.name==='NotSupportedError'?'Browser cannot decrypt here.':'');document.getElementById('download').hidden=true;}};document.getElementById('download').onclick=()=>{if(!plain)return;let u=URL.createObjectURL(new Blob([plain],{type:'application/json'}));let a=document.createElement('a');a.href=u;a.download='MEERA_DECRYPTED_BACKUP.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),12000)};})();</scr`+`ipt></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MEERA Locked Backup</title><style>body{margin:0;background:#edf3fd;font:16px system-ui,sans-serif;color:#122b55;display:grid;place-items:center;min-height:100vh;padding:16px;box-sizing:border-box}.card{max-width:480px;width:100%;box-sizing:border-box;background:white;padding:26px;border-radius:20px;box-shadow:0 12px 35px #0b1c3920}h1{font-size:23px}input,button{font:inherit;width:100%;padding:13px;margin:7px 0;box-sizing:border-box;border-radius:10px}input{border:2px solid #b6c6dc}button{background:#125be8;color:#fff;border:0;font-weight:800}#message{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><div class="card"><h1>🔒 MEERA Production Backup</h1><p>Enter the backup PIN to unlock this encrypted file.</p><form id="open"><input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Backup PIN" required><button>Unlock Backup</button></form><p id="message">Protected with AES-GCM encryption. Without the correct PIN, the entries remain encrypted.</p><button id="download" hidden>Download decrypted JSON</button></div><script id="meera-secure-payload" type="application/json">${archiveText}</scr`+`ipt><script>(function(){const a=JSON.parse(document.getElementById('meera-secure-payload').textContent),e=new TextEncoder(),d=new TextDecoder();const dec=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));let plain='';document.getElementById('open').onsubmit=async ev=>{ev.preventDefault();let pin=document.getElementById('pin').value;try{if(!crypto.subtle)throw Error('Open this file in a modern HTTPS-capable browser.');let base=await crypto.subtle.importKey('raw',e.encode(pin),'PBKDF2',false,['deriveKey']);let key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:dec(a.salt),iterations:250000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);plain=d.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:dec(a.iv)},key,dec(a.ciphertext)));let b=JSON.parse(plain);document.getElementById('message').textContent='Unlocked: '+b.entries.length+' entries for '+b.owner+'. You may export the decrypted JSON into a trusted location.';document.getElementById('download').hidden=false;}catch(x){plain='';document.getElementById('message').textContent='Wrong PIN or damaged file. '+(x.name==='NotSupportedError'?'Browser cannot decrypt here.':'');document.getElementById('download').hidden=true;}};document.getElementById('download').onclick=()=>{if(!plain)return;let u=URL.createObjectURL(new Blob([plain],{type:'application/json'}));let a=document.createElement('a');a.href=u;a.download='MEERA_DECRYPTED_BACKUP.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),12000)};})();</scr`+`ipt><!-- Admin-only visibility: production workers cannot see the AI/video UI. -->
+<style id="meera-studio-admin-visibility">
+#meeraAdminVideoStudio[hidden]{display:none!important}
+</style>
+<script id="meera-studio-admin-visibility-script">
+(function(){
+  const link=document.getElementById('meeraAdminVideoStudio');
+  if(!link)return;
+  function authenticatedAdmin(){
+    return !!(document.getElementById('appShell') &&
+      !document.getElementById('appShell').classList.contains('hidden') &&
+      typeof currentUser!=='undefined' && currentUser &&
+      String(currentUser.role||'').trim().toLowerCase()==='admin' &&
+      typeof sessionVerified!=='undefined' && sessionVerified);
+  }
+  function sync(){
+    const allowed=authenticatedAdmin();
+    link.hidden=!allowed;
+    link.style.display=allowed?'':'none';
+    if(!allowed){
+      const ai=document.getElementById('meeraAiRoot');
+      if(ai){ai.classList.add('hidden');const pane=document.getElementById('meeraAiChat');if(pane)pane.hidden=true;}
+    }
+  }
+  link.addEventListener('click',function(e){
+    if(!authenticatedAdmin()){e.preventDefault();sync();}
+  });
+  const shell=document.getElementById('appShell');
+  const badge=document.getElementById('userBadge');
+  if(shell)new MutationObserver(sync).observe(shell,{attributes:true,attributeFilter:['class']});
+  if(badge)new MutationObserver(sync).observe(badge,{childList:true,characterData:true,subtree:true});
+  document.addEventListener('click',function(){setTimeout(sync,0)},true);
+  sync();
+})();
+</script>
+</body></html>`;
 }
 async function v9Export(){
   if(!currentUser||!v9Db)return;
