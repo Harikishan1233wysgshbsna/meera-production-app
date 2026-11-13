@@ -803,6 +803,8 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
       <button id="quickOpenButton" type="button" class="btn btn-secondary" style="width:100%">⚡ Quick Open Last Session</button>
     </div>
     <div id="loginStatus" class="status" role="alert"></div>
+    <button id="meeraLoginServerCheck" type="button" class="btn btn-secondary" style="width:100%;margin:8px 0 4px" aria-describedby="meeraLoginServerStatus">🔎 Check LIVE Login Server</button>
+    <div id="meeraLoginServerStatus" class="sub" role="status" aria-live="polite" style="font-size:12px;white-space:normal"></div>
     <div class="login-note">
       <b>Shared mode:</b> sign in from any mobile. Users, machine assignments, prefixes, and production entries are stored in the shared Google Sheet backend and are loaded again whenever the form opens.
     </div>
@@ -1236,7 +1238,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
    Replace API with the /exec URL of the deployed shared Google Apps Script backend.
    Do not put a password or client secret in this HTML file.
 ------------------------------------------------- */
-let API = window.meeraActiveLiveExec || (function(){try{return localStorage.getItem("meera_live_exec_url_v103")||"https://script.google.com/macros/s/AKfycbw5vVPy6aoLR-s4pru2TWuoeS9iiB4GXx97vpDeFIyAdWsra8J4fCRHdo84EL0ctYEk1Q/exec"}catch(_){return "https://script.google.com/macros/s/AKfycbw5vVPy6aoLR-s4pru2TWuoeS9iiB4GXx97vpDeFIyAdWsra8J4fCRHdo84EL0ctYEk1Q/exec"}})();
+let API = "https://script.google.com/macros/s/AKfycbw5vVPy6aoLR-s4pru2TWuoeS9iiB4GXx97vpDeFIyAdWsra8J4fCRHdo84EL0ctYEk1Q/exec";
 // Live Planning is served by the backend to avoid browser/CSP blocks on Google Sheets JSONP.
 let WEB_APP_URL = API;
 window.meeraApplyLiveApi = function(url){ API=url; WEB_APP_URL=url; };
@@ -1435,7 +1437,7 @@ async function login(event){
     if(!result||!result.ok||!result.token){
       const challenge=await apiGet("challenge",{username});
       if(!challenge||!challenge.challengeId||!challenge.nonce){
-        throw new Error(result&&result.error&&result.error!=="Unknown request."?result.error:"Shared login backend is not connected.");
+        throw new Error("LIVE Backend Login Challenge route is unavailable. Existing Apps Script Web App needs a New Version deployment. "+String(challenge&&challenge.error||""));
       }
       result=await apiGet("login",{username,challengeId:challenge.challengeId,proof:await sha256(verifier+challenge.nonce)});
     }
@@ -3712,6 +3714,36 @@ document.addEventListener('click',function(e){if(e.target?.closest?.('[data-view
   if(badge)new MutationObserver(sync).observe(badge,{childList:true,characterData:true,subtree:true});
   document.addEventListener('click',function(){setTimeout(sync,0)},true);
   sync();
+})();
+</script>
+
+<script id="meera-live-login-check-rc5">
+/* Read-only login route diagnostic. Does not send a password or modify user records. */
+(function(){
+  function setup(){
+    const b=document.getElementById('meeraLoginServerCheck');
+    const out=document.getElementById('meeraLoginServerStatus');
+    if(!b||!out)return;
+    b.addEventListener('click',async function(){
+      b.disabled=true;b.textContent='Checking LIVE Server…';
+      out.textContent='Contacting the configured LIVE Apps Script…';
+      try{
+        if(typeof apiGet!=='function')throw Error('HTML API function not loaded.');
+        const r=await apiGet('challenge',{username:'saurabh'});
+        if(r&&r.ok===true&&r.challengeId&&r.nonce){
+          out.textContent='✓ LIVE Server connected. Login Challenge route is active. Check account credentials if login still fails.';
+          out.style.color='#166534';
+        }else{
+          out.textContent='✕ LIVE API responded, but Login Challenge is unavailable ('+String(r&&r.error||'unexpected response').slice(0,120)+'). Update the EXISTING Apps Script Web App deployment to a New Version.';
+          out.style.color='#991b1b';
+        }
+      }catch(e){
+        out.textContent='✕ LIVE Server check failed: '+String(e&&e.message||e).slice(0,200)+'. Verify deployment access /exec URL.';
+        out.style.color='#991b1b';
+      }finally{b.disabled=false;b.textContent='🔎 Check LIVE Login Server';}
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup);else setup();
 })();
 </script>
 </body>
