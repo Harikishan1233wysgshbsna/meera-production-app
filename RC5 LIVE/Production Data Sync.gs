@@ -1335,11 +1335,6 @@ function meeraRC5ExactIdentityRows_(sheet, column, value) {
   var found=range.createTextFinder(key).matchEntireCell(true).matchCase(false).findAll();
   return found.map(function(cell){return cell.getRow();});
 }
-function meeraRC5IncludeCandidateRows_(candidates, sheet, idColumn, boxColumn, requestId, box) {
-  meeraRC5ExactIdentityRows_(sheet,idColumn,requestId).forEach(function(n){candidates[n]=true;});
-  meeraRC5ExactIdentityRows_(sheet,boxColumn,box).forEach(function(n){candidates[n]=true;});
-}
-
 function meeraFastProductionIndex_(requestId,box,user,unit) {
   var sheet=getSpreadsheet_().getSheetByName(CONFIG.ENTRY_SHEET_NAME);
   if (!sheet) throw new Error('Production sheet missing.');
@@ -1360,9 +1355,9 @@ function meeraFastProductionIndex_(requestId,box,user,unit) {
     for(var n=start;n<=last;n++) candidates[n]=true;
   }
   // Check ALL historic matching identities; recent-15 alone is not safe.
-  meeraRC5IncludeCandidateRows_(candidates,sheet,MEERA_COL_REQID_+1,boxIndex+1,requestId,box);
   var exactIdRows=meeraRC5ExactIdentityRows_(sheet,MEERA_COL_REQID_+1,requestId);
   var exactBoxRows=meeraRC5ExactIdentityRows_(sheet,boxIndex+1,box);
+  exactIdRows.concat(exactBoxRows).forEach(function(n){candidates[n]=true;});
   var exactCandidates={};
   exactIdRows.concat(exactBoxRows).forEach(function(n){exactCandidates[n]=true;});
   Object.keys(candidates).forEach(function(k){
@@ -1386,9 +1381,9 @@ function meeraFastBackupIndex_(backup,requestId,box,user,unit) {
     for(var n=start;n<=last;n++) candidates[n]=true;
   }
   // Backup also must detect identities older than the 15-row cache.
-  meeraRC5IncludeCandidateRows_(candidates,backup,1,3,requestId,box);
   var exactIdRows=meeraRC5ExactIdentityRows_(backup,1,requestId);
   var exactBoxRows=meeraRC5ExactIdentityRows_(backup,3,box);
+  exactIdRows.concat(exactBoxRows).forEach(function(n){candidates[n]=true;});
   var exactCandidates={};
   exactIdRows.concat(exactBoxRows).forEach(function(n){exactCandidates[n]=true;});
   Object.keys(candidates).forEach(function(k){
