@@ -1,7 +1,8 @@
 /* RC5 LIVE WORKING-COPY SAFETY PATCH — 2026-11-13
  * GitHub-only source review: this is not the current deployed LIVE Apps Script.
- * Request IDs and box identities now have whole-sheet server-side exact checks.
- * Recovery only confirms matching owner/machine/box. Test performance under
+ * Request IDs and box identities have whole-sheet server-side exact checks.
+ * Distinct Request IDs may share a box; later rows are marked DUPLICATE.
+ * Recovery confirms only matching request/owner/machine/box. Test performance under
  * concurrent load and deploy in TEST before considering LIVE.
  */
 /*
@@ -886,7 +887,7 @@ function writeProductionStatuses_(statusMap) {
   let count = 0;
   for (let r = 0; r < column.length; r++) {
     const box = cleanBox_(values[r + 1][boxIndex]).toUpperCase();
-    if (box && keys[box] !== undefined) { column[r][0] = keys[box]; count++; }
+    if (box && keys[box] !== undefined && String(column[r][0]||'').trim().toUpperCase() !== 'DUPLICATE') { column[r][0] = keys[box]; count++; }
   }
   if (!count) return 0;
   const lock = LockService.getScriptLock(); lock.waitLock(15000);
@@ -1414,8 +1415,9 @@ function meeraFastTombstone_(ss, requestId, box) {
   var candidates={};ids.concat(boxes).forEach(function(n){candidates[n]=1;});
   return Object.keys(candidates).some(function(n){
     var v=sheet.getRange(Number(n),1,1,3).getDisplayValues()[0];
+    var deletedId=String(v[1]||'').trim();
     return String(v[0]||'').trim().toUpperCase()==='PRODUCTION DATA' &&
-      (String(v[1]||'').trim()===requestId || cleanBox_(v[2]).toUpperCase()===box);
+      (deletedId ? deletedId===requestId : cleanBox_(v[2]).toUpperCase()===box);
   });
 }
 function meeraFixBackupSheet_() {
@@ -1476,11 +1478,8 @@ function meeraFixEnsureBackupRow_(backup, index, body, requestId, box, machine, 
     }
     return rowNo;
   }
-  const clash = index.byBox[box] || [];
-  if (clash.length) {
-    throw new Error('Box ' + box + ' already has a pending server request. ' +
-      'It will be completed automatically; do not create a new entry for this box.');
-  }
+  // Distinct Request IDs are permitted for the same Box. A BOX must never
+  // suppress a real request or prevent its PENDING backup intent being saved.
   const payload = Object.assign({}, body);
   delete payload.token;
   backup.appendRow([requestId, body.date || '', box, machine, unit, user.username,
@@ -1571,9 +1570,9 @@ function meeraSaveEntryWithUser_(body, user) {
     const idRows = prod.byId[requestId] || [];
     const boxRows = prod.byBox[box] || [];
 
-    if (idRows.length > 1 || boxRows.length > 1) {
+    if (idRows.length > 1) {
       return { ok: false, status: 'REVIEW_REQUIRED', requestId: requestId, box: box,
-        message: 'Duplicate identity in PRODUCTION DATA. Admin review required.' };
+        message: 'Repeated Request ID in PRODUCTION DATA. Admin review required.' };
     }
 
     // (a) Already saved under this Request ID: heal the backup and confirm.
@@ -1600,12 +1599,10 @@ function meeraSaveEntryWithUser_(body, user) {
         rowNumber: confirmedRow, row: confirmedRow, message: 'Previously saved entry verified.' };
     }
 
-    // (b) Box already exists under another Request ID: clean duplicate.
-    if (boxRows.length === 1) {
-      return { ok: false, status: 'DUPLICATE_BOX', requestId: requestId, box: box,
-        existingRequestId: prod.idOf[boxRows[0]] || '', rowNumber: boxRows[0],
-        message: 'Box already exists in PRODUCTION DATA with another Request ID.' };
-    }
+    // (b) A different Request ID for an existing Box is a REAL entry.
+    // Save it, mark only the new production row DUPLICATE, and never re-append
+    // retries with an existing Request ID. The backup is keyed by Request ID.
+    const duplicateBox = boxRows.length > 0;
 
     // (c) Reserve the intent row (adopts an existing one for this ID).
     const backupRow = meeraFixEnsureBackupRow_(backup, bidx, meeraMinimalBackupPayload_(body), requestId, box, machine, unit, user, 'PENDING');
@@ -1613,7 +1610,7 @@ function meeraSaveEntryWithUser_(body, user) {
 
     // (d) Append the production row.
     const row = meeraFixBuildRow_(prod, body, { requestId: requestId, box: box, machine: machine,
-      unit: unit, product: product, monthName: monthName, weights: weights, user: user, reviewStatus: reviewReasons.length ? 'Needs Review' : 'Available for Conning' });
+      unit: unit, product: product, monthName: monthName, weights: weights, user: user, reviewStatus: duplicateBox ? 'DUPLICATE' : (reviewReasons.length ? 'Needs Review' : 'Available for Conning') });
     prod.sheet.appendRow(row);
     SpreadsheetApp.flush();
 
@@ -1630,7 +1627,7 @@ function meeraSaveEntryWithUser_(body, user) {
     meeraFixConfirmBackup_(backup, bidx, requestId, backupRow);
     meeraFixInvalidateCache_();
     return { ok: true, status: 'CONFIRMED', box: box, requestId: requestId,
-      rowNumber: newRowNumber, row: newRowNumber, reviewRequired: reviewReasons.length>0, warnings:reviewReasons, message: reviewReasons.length?'Entry saved; correction required.':'Entry saved and verified.' };
+      rowNumber: newRowNumber, row: newRowNumber, productionStatus:duplicateBox?'DUPLICATE':(reviewReasons.length?'Needs Review':'Available for Conning'), duplicateBox:duplicateBox, reviewRequired: duplicateBox || reviewReasons.length>0, warnings:reviewReasons, message: duplicateBox?'Entry saved; duplicate box flagged for review.':(reviewReasons.length?'Entry saved; correction required.':'Entry saved and verified.') };
   } finally {
     lock.releaseLock();
   }
@@ -1691,8 +1688,8 @@ function checkSaveStatus_(p) {
   if (!isAdmin && (user.machines || []).map(Number).indexOf(machine) < 0) {
     throw new Error('Machine not allowed for status check.');
   }
-  if ((prod.byBox[box] || []).length === 1) return { ok: true, requestId: requestId, box: box, status: 'DUPLICATE_BOX' };
-  if ((bidx.byBox[box] || []).length) return { ok: true, requestId: requestId, box: box, status: 'REVIEW_REQUIRED' };
+  // Box duplication is allowed: status checks are keyed by Request ID only.
+  // A different Request ID must remain eligible for a save/retry.
   return { ok: true, requestId: requestId, box: box, status: 'NOT_FOUND' };
 }
 
@@ -2782,8 +2779,8 @@ function meeraIsTombstoned_(ss, source, requestId, box) {
   if (!tab || tab.getLastRow() < 2) return false;
   const values = tab.getRange(2,1,tab.getLastRow()-1,3).getDisplayValues();
   return values.some(r => String(r[0]).trim().toUpperCase() === String(source).trim().toUpperCase() &&
-    ((requestId && String(r[1]).trim() === String(requestId).trim()) ||
-     (box && String(r[2]).trim().toUpperCase() === String(box).trim().toUpperCase())));
+    (String(r[1]||'').trim() ? String(r[1]).trim()===String(requestId||'').trim() :
+     Boolean(box && String(r[2]).trim().toUpperCase()===String(box).trim().toUpperCase())));
 }
 function meeraValidateEntryWeights_(body, typeCode) {
   const rollWeights = { A: 0.38, B: 0.29, C: 0.30, D: 0.25 };
@@ -3036,13 +3033,11 @@ function meeraReconcileAllPending(options) {
       if (meeraIsTombstoned_(ss,'PRODUCTION DATA',requestId,box)) {
         summary.review++; summary.details.push({ requestId, box, result:'TOMBSTONED' }); continue;
       }
-      // Never confirm a backup against an unrelated production row or a
-      // duplicated historic ID/box. Preserve all ambiguous rows for review.
+      // Different Request IDs may share the same Box. Only conflicting
+      // repeated Request IDs require manual investigation.
       const existingById=prod.byId[requestId]||[];
-      const existingByBox=prod.byBox[box]||[];
-      if (existingById.length>1 || existingByBox.length>1 ||
-          (existingByBox.length===1 && (existingById.length!==1 || existingByBox[0]!==existingById[0]))) {
-        summary.review++; summary.details.push({requestId,box,result:'IDENTITY_CONFLICT'}); continue;
+      if (existingById.length>1) {
+        summary.review++; summary.details.push({requestId,box,result:'DUPLICATE_REQUEST_ID'}); continue;
       }
       if (existingById.length===1) {
         const foundRow=existingById[0];
@@ -3069,9 +3064,10 @@ function meeraReconcileAllPending(options) {
       // The save engine takes its own lock, so none is held here.
       const result = meeraSaveEntryWithUser_(data, owner);
       const state = String(result.status||'').toUpperCase();
-      if (state === 'CONFIRMED') summary.saved++;
-      else if (state === 'DUPLICATE_BOX') summary.duplicate++;
-      else summary.review++;
+      if (state === 'CONFIRMED') {
+        summary.saved++;
+        if (result.duplicateBox) summary.duplicate++;
+      } else summary.review++;
       summary.details.push({ requestId, box, result:state });
       meeraAuditRecovery_(ss,'AUTO_RECONCILE','RECONCILE',requestId,box,state);
       prod = meeraFixProductionIndex_();
