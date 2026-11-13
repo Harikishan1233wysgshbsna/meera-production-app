@@ -2275,7 +2275,7 @@ async function v9RefreshUi(){
   const recentFinal=rows.filter(r=>V9_FINAL_STATES.has(r.state)&&!v9ShouldHideResolved(r,now)).reverse();
   // Every unresolved item stays visible; at most 60 recent resolved audit
   // items are displayed before their animation/30-minute cleanup.
-  const visible=unfinished.concat(backupWaiting,recentFinal.slice(0,60));
+  const visible=unfinished.concat(recentFinal.slice(0,60)); // Production-saved boxes leave upload list; audit+banner retain backup-pending count
   $("v9QueueBody").innerHTML=visible.length?visible.map(row=>{
     const suffix=String(row.requestId).slice(-8),warning=row.lastError?'<div class="v9-error">'+escapeHtml(String(row.lastError).slice(0,130))+'</div>':"";
     const action=!V9_FINAL_STATES.has(row.state)?'<button type="button" class="v9-mini" data-v9-action="check" data-v9-id="'+escapeHtml(row.requestId)+'">Check only</button>':"";
@@ -2390,6 +2390,11 @@ async function v9ApplyStatus(row,status){
     const key=V9_LEGACY_PREFIX+row.owner;
     try{const old=JSON.parse(localStorage.getItem(key)||"null");if(old&&old.requestId===row.requestId)localStorage.removeItem(key)}catch(e){}
     return true;
+  }
+  if(status==="REVIEW_REQUIRED" && row.state==="PRODUCTION_SAVED"){
+    await v9Change(row.requestId,{state:"PRODUCTION_SAVED",nextCheckAt:0,
+      lastError:"Production matched; backup still needs administrator review. Original payload retained."});
+    return false;
   }
   if(status==="REVIEW_REQUIRED"){
     // A request may briefly appear inconsistent while the POST is still
@@ -2524,6 +2529,9 @@ async function rc6ConfirmOne(){
             return;
           }
         }
+        // Always re-read after proof: never overwrite PRODUCTION_SAVED with stale PENDING.
+        row=await v9Get(row.requestId);
+        if(!row||row.owner!==owner||!v9IsActive(row))return;
         // Full verification still needs BACKUP CONFIRMED; only then release payload.
         const status=await v9CheckStatus(row);
         if(status==="NOT_FOUND" && row.state!=="PRODUCTION_SAVED" && row.lastPostedAt &&
