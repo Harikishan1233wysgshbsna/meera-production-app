@@ -2543,26 +2543,26 @@ async function rc7ProductionProofTick(){
 }
 setInterval(()=>{rc7ProductionProofTick().catch(()=>{})},3500);
 async function v9CheckOnly(id){
-  if(v9WorkerBusy){showStatus("formStatus","Queue is syncing. Wait a moment and check again.","info");return}
+  if(v9WorkerBusy){showStatus("formStatus","Queue is transmitting. Check again shortly.","info");return}
   if(!sessionVerified){showStatus("formStatus","Login online first. No request was sent.","err");return}
   const row=await v9Get(id);
   if(!row||row.owner!==v9Owner())return;
-  if(!await v9Lease()){showStatus("formStatus","Another tab is syncing. Try Check Only in a moment.","info");return}
+  if(!await v9Lease()){showStatus("formStatus","Another tab is syncing. Try again shortly.","info");return}
   v9WorkerBusy=true;
   try{
-    if(await v9ResolveExistingBox(row)){
-      await v9RefreshUi();
-      showStatus("formStatus","✓ "+row.box+" already exists in PRODUCTION DATA. No duplicate sent; local audit kept.","ok");
-      return;
-    }
+    // RC7: never depend on the legacy meeraQueueBoxStatus endpoint. Status
+    // lookup is read-only and keyed to the exact original Request ID.
     const status=await v9CheckStatus(row);
-    if(status==="NOT_FOUND" && !row.attempts){showStatus("formStatus","NOT SENT: "+row.box+" is still queued locally. No POST was sent by this check.","info")}
-    await v9ApplyStatus(row,status);await v9RefreshUi();
-    if(status==="CONFIRMED")showStatus("formStatus","✓ VERIFIED SAVED: "+row.box,"ok");
-    else if(status==="DUPLICATE_BOX")showStatus("formStatus","DUPLICATE REJECTED: "+row.box+". Attempt kept in audit.","err");
-    else showStatus("formStatus","Server reports "+status+" for "+row.box+". No POST was sent by this check.","info");
-  }catch(e){showStatus("formStatus","Could not verify "+row.box+": "+e.message+". Local queue kept.","err")}
-  finally{v9WorkerBusy=false;await v9Release();v9Schedule(10000)}
+    if(status==="CONFIRMED"){
+      await v9ApplyStatus(row,status);await v9RefreshUi();
+      showStatus("formStatus","✓ VERIFIED in PRODUCTION DATA: "+row.box,"ok");
+    }else if(status==="NOT_FOUND" && !(row.attempts||0)){
+      showStatus("formStatus","NOT SENT YET: "+row.box+" is kept on this device. No POST was sent by this check.","info");
+    }else{
+      showStatus("formStatus","Server reports "+status+" for "+row.box+". Original local entry retained.","info");
+    }
+  }catch(e){showStatus("formStatus","Could not verify "+row.box+": "+e.message+". Local entry retained.","err")}
+  finally{v9WorkerBusy=false;await v9Release();v9Schedule(1200)}
 }
 /* MEERA V102 locked backup. AES-256-GCM / PBKDF2 250k rounds.
    WARNING: This short fixed PIN is embedded in the app for automatic export;
