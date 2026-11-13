@@ -2423,7 +2423,7 @@ async function v9Process(row){
       }
     }
     row=await v9Change(row.requestId,{state:"SENDING",attempts:(row.attempts||0)+1,
-      lastPostedAt:Date.now(),nextCheckAt:0,lastError:"Transmission attempted. Save not yet confirmed."});
+      retryAuthorized:false,lastPostedAt:Date.now(),nextCheckAt:0,lastError:"Transmission attempted. Save not yet confirmed."});
     await v9PostOnce(row);
     // RC6: transmit and verify are separate lanes. This row has already been
     // POSTed once; never resend just because the no-cors response is opaque.
@@ -2455,7 +2455,8 @@ async function v9Work(){
       // Never select REVIEW_REQUIRED items, and never send the same entry twice in a batch.
       // Prioritize never-sent entries. Verification is handled independently;
       // no unconfirmed POST can block the next fresh box.
-      const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" && !r.attempts);
+      const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" &&
+        (!r.attempts || (r.retryAuthorized===true && (r.nextCheckAt||0)<=Date.now())));
       if(!eligible.length)break;
       const batch=eligible.slice(0,RC6_PARALLEL_SENDS);
       await Promise.allSettled(batch.map(row=>v9Process(row)));
@@ -2487,6 +2488,22 @@ async function rc6ConfirmOne(){
       rc6ConfirmLast.set(row.requestId,Date.now());
       try{
         const status=await v9CheckStatus(row);
+        if(status==="NOT_FOUND" && row.lastPostedAt &&
+           Date.now()-row.lastPostedAt>=V9_RETRY_GRACE_MS){
+          const fresh=await v9Get(row.requestId);
+          if(fresh&&fresh.owner===owner&&v9IsActive(fresh)&&!fresh.retryAuthorized){
+            if(fresh.attempts>=V9_MAX_POST_ATTEMPTS){
+              await v9Change(fresh.requestId,{state:"REVIEW_REQUIRED",nextCheckAt:0,
+                lastError:"Server did not confirm after maximum attempts. Manual review required; original payload kept."});
+            }else{
+              // Only exact NOT_FOUND after the grace window authorizes SAME-ID retry.
+              await v9Change(fresh.requestId,{state:"PENDING",retryAuthorized:true,
+                nextCheckAt:Date.now(),lastError:"Server reports NOT_FOUND after grace; same Request ID retry queued."});
+              v9Schedule(0);
+            }
+          }
+          return;
+        }
         if(status!=="CONFIRMED")return;
         const fresh=await v9Get(row.requestId);
         if(!fresh||fresh.owner!==owner||!v9IsActive(fresh)||!fresh.attempts)return;
