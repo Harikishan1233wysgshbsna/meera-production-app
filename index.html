@@ -2414,7 +2414,10 @@ async function v9Process(row){
       const status=await v9CheckStatus(row);
       if(await v9ApplyStatus(row,status))return;
       row=await v9Get(row.requestId);
-      if(row.lastPostedAt && Date.now()-row.lastPostedAt<V9_RETRY_GRACE_MS)return;
+      if(row.lastPostedAt && Date.now()-row.lastPostedAt<V9_RETRY_GRACE_MS){
+        await v9Change(row.requestId,{state:"PENDING",nextCheckAt:Date.now()+V9_RECHECK_MS,lastError:"Previous request may still be processing; checking safely before retry."});
+        return;
+      }
       if(row.attempts>=V9_MAX_POST_ATTEMPTS){
         await v9Change(row.requestId,{state:"REVIEW_REQUIRED",lastError:"Retry limit reached; manual admin verification required.",nextCheckAt:0});return;
       }
