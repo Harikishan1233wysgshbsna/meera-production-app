@@ -2226,7 +2226,10 @@ async function v9RefreshUi(){
   const owner=v9Owner(),rows=await v9GetAll(owner);
   if(v9Owner()!==owner)return;
   v9KnownBoxes=new Set(rows.map(r=>r.box));
-  const waiting=rows.filter(r=>v9IsActive(r)&&r.state!=="PRODUCTION_SAVED"),verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER"||r.state==="PRODUCTION_SAVED").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
+  const waiting=rows.filter(r=>v9IsActive(r)&&r.state!=="PRODUCTION_SAVED"),
+    prodSavedCount=rows.filter(r=>r.state==="PRODUCTION_SAVED").length,
+    verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER").length,
+    rejected=rows.filter(r=>r.state==="DUPLICATE").length;
   v9LastCount=waiting.length;
   $("v9QueuedCount").textContent=waiting.length;
   $("v9SavedCount").textContent=verified;
@@ -2234,7 +2237,7 @@ async function v9RefreshUi(){
   const status=$("v9QueueSummary");
   status.textContent=waiting.some(r=>r.state==="REVIEW_REQUIRED")?
     "⚠ ADMIN REVIEW needed. Other distinct boxes can continue syncing; this box stays on hold.":
-    waiting.length?"Local queue is safe on this browser profile. Server verification runs in the background; keep the browser open when possible.":
+    waiting.length||prodSavedCount?"Upload pending: "+waiting.length+"; Production saved but backup audit pending: "+prodSavedCount+". Keep local storage intact.":
     "No unverified entries in this browser. The server is the authority for saved entries.";
   const now=Date.now();
   v9ScheduleArchiveRefresh(rows,now);
