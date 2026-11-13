@@ -812,6 +812,12 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </section>
 
 <div id="appShell" class="hidden">
+<div id="rc6QueueSafetyBanner" hidden role="status" aria-live="polite" style="position:sticky;top:0;z-index:800;background:#fff4e5;border:2px solid #c2410c;color:#7c2d12;padding:10px 14px;font-size:14px;font-weight:700">
+  <strong>⚠ RC6 NOT SENT / NOT VERIFIED: <span id="rc6PendingCount">0</span></strong>
+  <span style="margin-left:10px">Needs review: <span id="rc6ReviewCount">0</span></span>
+  <div id="rc6QueueSafetyText" style="font-size:12px;margin-top:5px">Do not turn off your phone while entries remain unverified.</div>
+  <button id="rc6SyncNow" type="button" class="btn btn-secondary" style="margin-top:6px;padding:6px 12px;min-height:34px">↻ Sync Now</button>
+</div>
   <header class="app-header">
     <div class="header-inner">
       <div class="header-left">
@@ -2011,6 +2017,9 @@ const V9_FINAL_STATES=new Set(["SAVED","DUPLICATE","ON_SERVER"]);
 const V9_RECHECK_MS=15000;
 const V9_RETRY_GRACE_MS=90000;
 const V9_MAX_POST_ATTEMPTS=3;
+const RC6_PARALLEL_SENDS=2; // bounded concurrency; backend still serializes protected writes
+let rc6UnverifiedCount=0;
+let rc6ReviewCount=0;
 let reliableLastConfirmed=null;
 let v9Db=null, v9StorageReady=false, v9LocalBusy=false, v9WorkerBusy=false;
 let v9CorruptLegacy=false, v9Timer=null, v9KnownBoxes=new Set();
@@ -2228,6 +2237,20 @@ async function v9RefreshUi(){
   v9KnownBoxes=new Set(rows.map(r=>r.box));
   const waiting=rows.filter(v9IsActive),verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
   v9LastCount=waiting.length;
+  rc6UnverifiedCount=waiting.length+rows.filter(r=>r.state==="ON_SERVER").length;
+  rc6ReviewCount=waiting.filter(r=>r.state==="REVIEW_REQUIRED").length+rows.filter(r=>r.state==="ON_SERVER").length;
+  const rc6Banner=document.getElementById("rc6QueueSafetyBanner");
+  const rc6Count=document.getElementById("rc6PendingCount");
+  const rc6Review=document.getElementById("rc6ReviewCount");
+  const rc6Status=document.getElementById("rc6QueueSafetyText");
+  if(rc6Banner){
+    rc6Banner.hidden=rc6UnverifiedCount===0;
+    if(rc6Count)rc6Count.textContent=String(rc6UnverifiedCount);
+    if(rc6Review)rc6Review.textContent=String(rc6ReviewCount);
+    if(rc6Status)rc6Status.textContent=rc6UnverifiedCount
+      ? "These entries are NOT fully server-confirmed. Keep this tab OPEN with internet ON until Pending = 0; export a backup if you must stop."
+      : "All entries in this browser are server-confirmed.";
+  }
   $("v9QueuedCount").textContent=waiting.length;
   $("v9SavedCount").textContent=verified;
   $("v9RejectedCount").textContent=rejected;
@@ -2276,7 +2299,7 @@ async function v9OnLogin(){
   try{
     await v9Open();await v9MigrateLegacy();
     v9StorageReady=true;v9CorruptLegacy=false;
-    await v9RefreshUi();v9Schedule(120);
+    await v9RefreshUi();v9Schedule(0);
     if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
   }catch(e){v9StorageReady=false;v9SetButton();showStatus("formStatus","V9 queue unavailable: "+(e.message||"Storage error")+". No new entry can be sent.","err")}
 }
@@ -2425,17 +2448,19 @@ async function v9Work(){
       const records=await v9GetAll(owner);
       const active=records.filter(v9IsActive);
       if(!active.length)break;
-      // A REVIEW_REQUIRED/awaiting-check item is retained, not deleted.
-      // Other distinct box numbers may continue; same box remains blocked.
-      const first=active.find(r=>r.state!=="REVIEW_REQUIRED" && (r.nextCheckAt||0)<=Date.now());
-      if(!first)break;
-      await v9Process(first);
+      // RC6: send at most two distinct Request IDs concurrently. All entries remain
+      // durable in IndexedDB, backend atomic locking + request IDs prevent double writes.
+      // Never select REVIEW_REQUIRED items, and never send the same entry twice in a batch.
+      const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" && (r.nextCheckAt||0)<=Date.now());
+      if(!eligible.length)break;
+      const batch=eligible.slice(0,RC6_PARALLEL_SENDS);
+      await Promise.allSettled(batch.map(row=>v9Process(row)));
       await v9RefreshUi();
-      // Continue with next eligible box; idempotency stays on server Request ID.
+      // Continue draining immediately while the page is active; do not wait 12s per box.
     }
   }finally{
     clearInterval(heartbeat);v9WorkerBusy=false;
-    await v9Release(owner);await v9RefreshUi();v9Schedule(12000);
+    await v9Release(owner);await v9RefreshUi();v9Schedule(3000);
   }
 }
 async function v9CheckOnly(id){
@@ -2604,7 +2629,7 @@ async function saveEntry(event){
     v9PrepareNextForm(finalBox);
     showStatus("formStatus","✓ QUEUED LOCALLY: "+finalBox+". NOT YET SAVED to Google Sheet. You can enter next box.","info");
     await v9RefreshUi();
-    v9Schedule(50);
+    v9Schedule(0);
     // Optional admin inbox report is never on the critical path of local Save.
     // Disabled automatically until authenticated monitor backend is deployed.
     if(window.meeraMonitorQueueReport)window.meeraMonitorQueueReport(entry);
@@ -2910,6 +2935,17 @@ document.addEventListener("DOMContentLoaded",async()=>{
   $("loginForm").addEventListener("submit",login);window.__meeraLoginHandlerReady=true;$("quickOpenButton").addEventListener("click",quickOpenSavedSession);$("historyToggle").addEventListener("click",toggleHistory);$("logoutButton").addEventListener("click",logout);
   $("entryForm").addEventListener("submit",saveEntry);v9SetButton();v9ObserveQueuePanel();
   $("v9SyncNow").addEventListener("click",()=>v9Schedule(20));
+  document.getElementById("rc6SyncNow")?.addEventListener("click",()=>{
+    v9Schedule(0);showStatus("formStatus","Sync requested. Keep the app open and wait for server confirmation.","info");
+  });
+  window.addEventListener("beforeunload",event=>{
+    if(!currentUser||rc6UnverifiedCount===0)return;
+    // Browsers may ignore this prompt, especially on mobile. Never rely on it for data transport.
+    event.preventDefault();event.returnValue="";
+  });
+  window.addEventListener("online",()=>{if(currentUser&&sessionVerified)v9Schedule(0)});
+  // Foreground-only: modern phones suspend JavaScript after locking or closing.
+  setInterval(()=>{if(currentUser&&sessionVerified&&rc6UnverifiedCount>0&&!document.hidden&&!v9WorkerBusy)v9Schedule(0)},3500);
   $("v9Export").addEventListener("click",()=>v9Export().catch(e=>showStatus("formStatus",e.message,"err")));
   $("v9ClearOldLocal").addEventListener("click",()=>meeraClearOldLocalData().catch(e=>meeraRecoverySay('Clear not completed: '+e.message+'. Preserve your downloaded backup.')));
   $("v9ImportButton").addEventListener("click",()=>$("v9ImportFile").click());
