@@ -2219,14 +2219,14 @@ function v9ObserveQueuePanel(){
     check();
   }
 }
-function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
+function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",PRODUCTION_SAVED:"Saved in Production (backup auditing)",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
 function v9StatusClass(state){return state==="SAVED"?"ok":state==="DUPLICATE"||state==="REVIEW_REQUIRED"?"err":"info"}
 async function v9RefreshUi(){
   if(!currentUser||!v9Db)return;
   const owner=v9Owner(),rows=await v9GetAll(owner);
   if(v9Owner()!==owner)return;
   v9KnownBoxes=new Set(rows.map(r=>r.box));
-  const waiting=rows.filter(v9IsActive),verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
+  const waiting=rows.filter(r=>v9IsActive(r)&&r.state!=="PRODUCTION_SAVED"),verified=rows.filter(r=>r.state==="SAVED"||r.state==="ON_SERVER"||r.state==="PRODUCTION_SAVED").length,rejected=rows.filter(r=>r.state==="DUPLICATE").length;
   v9LastCount=waiting.length;
   $("v9QueuedCount").textContent=waiting.length;
   $("v9SavedCount").textContent=verified;
@@ -2241,7 +2241,7 @@ async function v9RefreshUi(){
   // The local audit is permanent; only filter what is DISPLAYED here.
   // Show ALL unresolved records before resolved ones, so a full history
   // cannot push active or admin-review boxes out of the 35-row view.
-  const unfinished=rows.filter(v9IsActive).reverse();
+  const unfinished=rows.filter(r=>v9IsActive(r)&&r.state!=="PRODUCTION_SAVED").reverse();
   const recentFinal=rows.filter(r=>V9_FINAL_STATES.has(r.state)&&!v9ShouldHideResolved(r,now)).reverse();
   // Every unresolved item stays visible; at most 60 recent resolved audit
   // items are displayed before their animation/30-minute cleanup.
@@ -2361,6 +2361,7 @@ async function v9ApplyStatus(row,status){
     try{const old=JSON.parse(localStorage.getItem(key)||"null");if(old&&old.requestId===row.requestId)localStorage.removeItem(key)}catch(e){}
     return true;
   }
+  if(status==="REVIEW_REQUIRED" && row.state==="PRODUCTION_SAVED")return false;
   if(status==="REVIEW_REQUIRED"){
     // A request may briefly appear inconsistent while the POST is still
     // completing. Wait rather than prematurely marking an admin conflict.
@@ -2369,6 +2370,7 @@ async function v9ApplyStatus(row,status){
     }
     await v9Change(row.requestId,{state:"REVIEW_REQUIRED",nextCheckAt:0,lastError:"Server requires administrator review. No automatic retry."});return true;
   }
+  if(row.state==="PRODUCTION_SAVED")return false;
   await v9Change(row.requestId,{state:"PENDING",nextCheckAt:Date.now()+V9_RECHECK_MS,lastError:"Awaiting server confirmation ("+status+")"});
   return false;
 }
@@ -2427,7 +2429,7 @@ async function v9Work(){
       if(!active.length)break;
       // A REVIEW_REQUIRED/awaiting-check item is retained, not deleted.
       // Other distinct box numbers may continue; same box remains blocked.
-      const first=active.find(r=>r.state!=="REVIEW_REQUIRED" && (r.nextCheckAt||0)<=Date.now());
+      const first=active.find(r=>r.state!=="REVIEW_REQUIRED" && r.state!=="PRODUCTION_SAVED" && (r.nextCheckAt||0)<=Date.now());
       if(!first)break;
       await v9Process(first);
       await v9RefreshUi();
@@ -2438,6 +2440,48 @@ async function v9Work(){
     await v9Release(owner);await v9RefreshUi();v9Schedule(12000);
   }
 }
+// RC7 LIVE: production-proof lane independent of backup confirmation.
+let rc7ProofBusy=false,rc7ProofCursor=0,rc7ProofLast=new Map();
+async function rc7ProductionProofTick(){
+  if(rc7ProofBusy||!v9StorageReady||!v9Db||!sessionVerified||!currentUser||document.hidden)return;
+  rc7ProofBusy=true;
+  try{
+    const owner=v9Owner(), all=await v9GetAll(owner);
+    const outstanding=all.filter(r=>r.attempts>0&&v9IsActive(r)&&r.state!=="REVIEW_REQUIRED");
+    if(!outstanding.length)return;
+    const now=Date.now(), ready=outstanding.filter(r=>now-(rc7ProofLast.get(r.requestId)||0)>8000);
+    if(!ready.length)return;
+    const chosen=ready[rc7ProofCursor++%ready.length];
+    rc7ProofLast.set(chosen.requestId,now);
+    if(chosen.state!=="PRODUCTION_SAVED"){
+      let proof;
+      try{proof=await jsonp(buildUrl("rc6ProductionProof",{
+        token:sessionToken,requestId:chosen.requestId,box:chosen.box,machine:String(chosen.payload.machine)
+      }),14000)}catch(e){return}
+      if(!proof||proof.ok!==true||proof.status!=="PRODUCTION_SAVED"||
+         String(proof.requestId)!==chosen.requestId||String(proof.box).toUpperCase()!==chosen.box||
+         Number(proof.machine)!==Number(chosen.payload.machine))return;
+      const current=await v9Get(chosen.requestId);
+      if(!current||current.owner!==owner||!v9IsActive(current))return;
+      await v9Change(chosen.requestId,{state:"PRODUCTION_SAVED",productionVerifiedAt:new Date().toISOString(),
+        nextCheckAt:Date.now()+V9_RECHECK_MS,
+        lastError:"Production data verified. Full payload retained until backup is verified."});
+      await v9RefreshUi();
+    }
+    const current=await v9Get(chosen.requestId);
+    if(!current||current.owner!==owner||!v9IsActive(current))return;
+    try{
+      const status=await v9CheckStatus(current);
+      if(status==="CONFIRMED"){
+        const latest=await v9Get(chosen.requestId);
+        if(latest&&latest.owner===owner&&v9IsActive(latest)){
+          await v9ApplyStatus(latest,status);await v9RefreshUi();
+        }
+      }
+    }catch(e){}
+  }finally{rc7ProofBusy=false}
+}
+setInterval(()=>{rc7ProductionProofTick().catch(()=>{})},4000);
 async function v9CheckOnly(id){
   if(v9WorkerBusy){showStatus("formStatus","Queue is syncing. Wait a moment and check again.","info");return}
   if(!sessionVerified){showStatus("formStatus","Login online first. No request was sent.","err");return}
