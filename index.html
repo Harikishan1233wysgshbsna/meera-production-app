@@ -638,8 +638,9 @@ html[data-meera-theme="dark"] .meera-ai-compose textarea{background:#1e3049;bord
 </style>
 <script id="meera-api-fix-script">
 (function(){
-const storageKey='meera_live_exec_url_v102';
-function safeGet(){try{return localStorage.getItem(storageKey)||''}catch(_){return ''}}
+const storageKey='meera_live_exec_url_v103';
+const defaultLiveExec='https://script.google.com/macros/s/AKfycbw5vVPy6aoLR-s4pru2TWuoeS9iiB4GXx97vpDeFIyAdWsra8J4fCRHdo84EL0ctYEk1Q/exec';
+function safeGet(){try{return localStorage.getItem(storageKey)||defaultLiveExec}catch(_){return defaultLiveExec}}
 function safeSet(value){try{localStorage.setItem(storageKey,value);return true}catch(_){return false}}
 function validUrl(value){try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='script.google.com'&&/^\/macros\/s\/[^/]+\/exec$/.test(u.pathname)}catch(e){return false}}
 function setup(){const d=document.createElement('div');d.id='meeraLiveApiSetup';d.hidden=!!safeGet();
@@ -1235,7 +1236,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
    Replace API with the /exec URL of the deployed shared Google Apps Script backend.
    Do not put a password or client secret in this HTML file.
 ------------------------------------------------- */
-let API = window.meeraActiveLiveExec || (function(){try{return localStorage.getItem("meera_live_exec_url_v102")||""}catch(_){return ""}})();
+let API = window.meeraActiveLiveExec || (function(){try{return localStorage.getItem("meera_live_exec_url_v103")||"https://script.google.com/macros/s/AKfycbw5vVPy6aoLR-s4pru2TWuoeS9iiB4GXx97vpDeFIyAdWsra8J4fCRHdo84EL0ctYEk1Q/exec"}catch(_){return "https://script.google.com/macros/s/AKfycbw5vVPy6aoLR-s4pru2TWuoeS9iiB4GXx97vpDeFIyAdWsra8J4fCRHdo84EL0ctYEk1Q/exec"}})();
 // Live Planning is served by the backend to avoid browser/CSP blocks on Google Sheets JSONP.
 let WEB_APP_URL = API;
 window.meeraApplyLiveApi = function(url){ API=url; WEB_APP_URL=url; };
