@@ -2092,6 +2092,19 @@ function v9Get(id){return v9Transaction("entries","readonly",(s,set)=>{s.get(id)
 function v9GetAll(owner){return v9Transaction("entries","readonly",(s,set)=>{
   s.index("owner").getAll(owner).onsuccess=e=>set((e.target.result||[]).sort((a,b)=>(Number(a.localSeq)||0)-(Number(b.localSeq)||0)||a.requestId.localeCompare(b.requestId)));
 })}
+// Atomic local state transition: an in-flight worker must never move a
+// server-verified SAVED record back to PENDING or overwrite its audit metadata.
+function v9ChangeIfState(id,allowed,patch){
+  return v9Transaction("entries","readwrite",(store,set)=>{
+    const req=store.get(id);
+    req.onsuccess=()=>{
+      const old=req.result;
+      if(!old||!allowed.includes(old.state))return;
+      const next={...old,...patch,updatedAt:new Date().toISOString()};
+      store.put(next);set(next);
+    };
+  });
+}
 async function v9Change(id,patch){
   const old=await v9Get(id);if(!old)throw new Error("Queue entry disappeared; stop and check backup");
   const updated={...old,...patch,updatedAt:new Date().toISOString()};
@@ -2347,10 +2360,13 @@ async function v9ResolveExistingBox(row){
 }
 async function v9ApplyStatus(row,status){
   if(status==="CONFIRMED"){
-    // After verified server save, release the full mobile payload. Keep only
-    // request-ID/box audit metadata; LIVE Production + Backup hold the entry.
-    await v9Change(row.requestId,{state:"SAVED",verifiedAt:new Date().toISOString(),nextCheckAt:0,lastError:"",
+    // Only after exact server-confirmed Production save, release the full local
+    // payload and retain request-ID/box audit metadata. RC7 does not require Backup.
+    const updated=await v9ChangeIfState(row.requestId,
+      ["QUEUED","SENDING","PENDING","PRODUCTION_SAVED","REVIEW_REQUIRED"],
+      {state:"SAVED",retryAuthorized:false,verifiedAt:new Date().toISOString(),nextCheckAt:0,lastError:"",
       payload:{action:"saveEntry",requestId:row.requestId,box:row.box,machine:row.payload.machine,unit:row.payload.unit}});
+    if(!updated)return true;
     reliableLastConfirmed={box:row.box,unit:row.payload.unit,machine:row.payload.machine};
     const key=V9_LEGACY_PREFIX+row.owner;
     try{const old=JSON.parse(localStorage.getItem(key)||"null");if(old&&old.requestId===row.requestId)localStorage.removeItem(key)}catch(e){}
@@ -2389,97 +2405,143 @@ async function v9PostOnce(row){
 }
 async function v9Process(row){
   if(!sessionVerified||v9Owner()!==row.owner)return;
+  const id=row.requestId;
   try{
-    // Request ID is the only idempotency key. Do not suppress a distinct
-    // submission because the same Box was previously recorded.
+    // A sent request is never blindly retransmitted. Only a server NOT_FOUND
+    // verdict after 90s can authorize retry, using the SAME Request ID.
     if(row.attempts>0){
+      if(row.retryAuthorized!==true)return;
       const status=await v9CheckStatus(row);
-      if(await v9ApplyStatus(row,status))return;
-      row=await v9Get(row.requestId);
-      if(row.lastPostedAt && Date.now()-row.lastPostedAt<V9_RETRY_GRACE_MS)return;
+      if(status==="CONFIRMED"){await v9ApplyStatus(row,status);return;}
+      if(status!=="NOT_FOUND"){
+        await v9ChangeIfState(id,["SENDING","PENDING"],{retryAuthorized:false,
+          nextCheckAt:Date.now()+V9_RECHECK_MS,
+          lastError:"Retry held; server reports "+status});
+        return;
+      }
+      if(row.lastPostedAt&&Date.now()-row.lastPostedAt<V9_RETRY_GRACE_MS)return;
       if(row.attempts>=V9_MAX_POST_ATTEMPTS){
-        await v9Change(row.requestId,{state:"REVIEW_REQUIRED",lastError:"Retry limit reached; manual admin verification required.",nextCheckAt:0});return;
+        await v9ChangeIfState(id,["PENDING","SENDING"],{state:"REVIEW_REQUIRED",
+          retryAuthorized:false,lastError:"Maximum same-ID retries reached; admin review required."});
+        return;
       }
     }
-    row=await v9Change(row.requestId,{state:"SENDING",attempts:(row.attempts||0)+1,
-      lastPostedAt:Date.now(),nextCheckAt:0,lastError:"Transmission attempted. Save not yet confirmed."});
-    await v9PostOnce(row);
-    // Keep the device queue ordered. GET can complete after the POST has
-    // reached the sheet, but we never infer success from the no-cors response.
-    for(let attempt=0;attempt<2;attempt++){
-      if(!sessionVerified||v9Owner()!==row.owner)break;
-      await new Promise(resolve=>setTimeout(resolve,attempt===0?1000:1700));
-      const status=await v9CheckStatus(row);
-      if(await v9ApplyStatus(row,status))return;
-      row=await v9Get(row.requestId);
-    }
+    const next=await v9ChangeIfState(id,["QUEUED","PENDING","SENDING"],{
+      state:"SENDING",retryAuthorized:false,attempts:(row.attempts||0)+1,
+      lastPostedAt:Date.now(),nextCheckAt:0,
+      lastError:"Entry sent; awaiting exact Production confirmation."});
+    if(!next)return;
+    await v9PostOnce(next);
+    await v9ChangeIfState(id,["SENDING"],{state:"PENDING",
+      nextCheckAt:Date.now()+V9_RECHECK_MS,
+      lastError:"Sent to server. Checking Request ID without blocking next box."});
   }catch(e){
-    await v9Change(row.requestId,{state:"PENDING",nextCheckAt:Date.now()+V9_RECHECK_MS,
-      lastError:"Verification unavailable: "+String(e.message||e).slice(0,150)});
+    await v9ChangeIfState(id,["SENDING"],{state:"PENDING",
+      nextCheckAt:Date.now()+V9_RECHECK_MS,
+      lastError:"Transmission uncertain; payload retained: "+String(e.message||e).slice(0,120)});
   }
 }
 async function v9Work(){
   if(v9WorkerBusy||!v9Db||!v9StorageReady||!sessionVerified||!currentUser)return;
   const owner=v9Owner();
-  if(!await v9Lease()){v9Schedule(14000);return}
+  if(!await v9Lease()){v9Schedule(1200);return}
   v9WorkerBusy=true;
   const heartbeat=setInterval(()=>{if(v9Owner()===owner)v9Lease(true,owner).catch(()=>{})},25000);
   try{
     for(let i=0;i<30;i++){
       if(!sessionVerified||v9Owner()!==owner)break;
-      const records=await v9GetAll(owner);
-      const active=records.filter(v9IsActive);
-      if(!active.length)break;
-      // A REVIEW_REQUIRED/awaiting-check item is retained, not deleted.
-      // Other distinct box numbers may continue; same box remains blocked.
-      const first=active.find(r=>r.state!=="REVIEW_REQUIRED" && r.state!=="PRODUCTION_SAVED" && (r.nextCheckAt||0)<=Date.now());
-      if(!first)break;
-      await v9Process(first);
+      const records=await v9GetAll(owner),active=records.filter(v9IsActive);
+      // Two distinct POSTs at a time. All other sent entries are independently
+      // verified in batches; no "waiting five minutes per box" bottleneck.
+      const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" &&
+        (r.nextCheckAt||0)<=Date.now() &&
+        (!(r.attempts||0)||r.retryAuthorized===true));
+      if(!eligible.length)break;
+      await Promise.allSettled(eligible.slice(0,2).map(r=>v9Process(r)));
       await v9RefreshUi();
-      // Continue with next eligible box; idempotency stays on server Request ID.
     }
   }finally{
     clearInterval(heartbeat);v9WorkerBusy=false;
-    await v9Release(owner);await v9RefreshUi();v9Schedule(12000);
+    await v9Release(owner);await v9RefreshUi();v9Schedule(1500);
   }
 }
-// RC7 LIVE: direct Production-only status confirmation lane.
-// This invokes checkSaveStatus => meeraRC7DirectStatus_ in deployed RC7.
-// Never treats the opaque POST response, a matching Box alone or a timeout as saved.
+// RC7 LIVE: batched, exact Production Data verification (max 12 per poll).
+// Old server deployments automatically fall back to existing single-ID checks.
 let rc7ProofBusy=false,rc7ProofCursor=0,rc7ProofLast=new Map();
+async function rc7ConfirmOneResult(row,status){
+  if(status==="CONFIRMED"){
+    const fresh=await v9Get(row.requestId);
+    if(fresh&&fresh.owner===row.owner&&v9IsActive(fresh))
+      await v9ApplyStatus(fresh,status);
+    rc7ProofLast.delete(row.requestId);
+  }else if(status==="NOT_FOUND"&&row.lastPostedAt &&
+           Date.now()-row.lastPostedAt>=V9_RETRY_GRACE_MS){
+    const fresh=await v9Get(row.requestId);
+    if(!fresh||!v9IsActive(fresh)||fresh.state==="REVIEW_REQUIRED"||
+       fresh.retryAuthorized===true)return;
+    if(fresh.attempts>=V9_MAX_POST_ATTEMPTS){
+      await v9ChangeIfState(row.requestId,["SENDING","PENDING"],{state:"REVIEW_REQUIRED",
+        retryAuthorized:false,lastError:"Server did not confirm after maximum retries. Preserve payload; admin review."});
+    }else{
+      await v9ChangeIfState(row.requestId,["SENDING","PENDING"],{state:"PENDING",
+        retryAuthorized:true,nextCheckAt:Date.now(),
+        lastError:"Server says NOT_FOUND after grace. Same Request ID retry queued."});
+      v9Schedule(0);
+    }
+  }else if(status==="REVIEW_REQUIRED"&&row.lastPostedAt&&
+           Date.now()-row.lastPostedAt>=V9_RETRY_GRACE_MS){
+    await v9ChangeIfState(row.requestId,["SENDING","PENDING"],{
+      state:"REVIEW_REQUIRED",retryAuthorized:false,
+      lastError:"Server identity conflict; administrator review required."});
+  }
+}
 async function rc7ProductionProofTick(){
   if(rc7ProofBusy||!v9StorageReady||!v9Db||!sessionVerified||!currentUser||document.hidden)return;
   rc7ProofBusy=true;
   try{
     const owner=v9Owner(),all=await v9GetAll(owner),now=Date.now();
-    // Include REVIEW_REQUIRED: an earlier timeout can leave a truly saved
-    // entry stranded. Exact confirmation can safely resolve it.
-    const candidates=all.filter(r=>r.attempts>0&&r.state!=="SAVED"&&
-      r.state!=="ON_SERVER"&&r.state!=="DUPLICATE" &&
-      r.payload&&r.payload.machine!=null&&
-      now-(rc7ProofLast.get(r.requestId)||0)>=8000);
-    if(!candidates.length)return;
-    const start=rc7ProofCursor%candidates.length;
-    const selected=candidates.slice(start).concat(candidates.slice(0,start)).slice(0,2);
+    const outstanding=all.filter(r=>(r.attempts||0)>0&&v9IsActive(r)&&
+      r.payload&&r.payload.machine!=null &&
+      now-(rc7ProofLast.get(r.requestId)||0)>=6500);
+    if(!outstanding.length)return;
+    const start=rc7ProofCursor%outstanding.length;
+    const selected=outstanding.slice(start).concat(outstanding.slice(0,start)).slice(0,12);
     rc7ProofCursor+=selected.length;
-    await Promise.allSettled(selected.map(async row=>{
-      rc7ProofLast.set(row.requestId,Date.now());
-      try{
-        // Read-only exact Request ID + Box + Machine + authenticated owner
-        // server check. RC7 no longer relies on RC6 proof or Backup status.
-        const status=await v9CheckStatus(row);
-        if(status!=="CONFIRMED")return;
-        const latest=await v9Get(row.requestId);
-        if(!latest||latest.owner!==owner||["SAVED","ON_SERVER","DUPLICATE"].includes(latest.state))return;
-        await v9ApplyStatus(latest,status);
-      }catch(e){
-        v9LastStatus="RC7 confirmation delayed: "+String(e&&e.message||e).slice(0,110);
+    selected.forEach(r=>rc7ProofLast.set(r.requestId,now));
+    const byId=new Map();
+    let batchOk=false;
+    try{
+      const response=await jsonp(buildUrl("checkSaveStatusBatch",{
+        token:sessionToken,records:JSON.stringify(selected.map(r=>({
+          requestId:r.requestId,box:r.box,machine:r.payload.machine
+        })))
+      }),16000);
+      if(response&&response.ok===true&&Array.isArray(response.results)){
+        response.results.forEach(v=>{
+          if(v&&v.ok===true&&
+             ["CONFIRMED","NOT_FOUND","PENDING","REVIEW_REQUIRED"].includes(String(v.status||"").toUpperCase()))
+            byId.set(String(v.requestId||""),v);
+        });
+        batchOk=true;
       }
-    }));
+    }catch(e){ /* Old backend: use single-ID fallback below. */ }
+    if(batchOk){
+      await Promise.allSettled(selected.map(async row=>{
+        const v=byId.get(row.requestId);
+        if(!v||String(v.box||"").toUpperCase()!==row.box ||
+           (v.status==="CONFIRMED"&&Number(v.machine)!==Number(row.payload.machine)))return;
+        await rc7ConfirmOneResult(row,String(v.status).toUpperCase());
+      }));
+    }else{
+      // A stale pre-RC7 deployment or temporary batch error cannot erase data.
+      await Promise.allSettled(selected.slice(0,2).map(async row=>{
+        try{await rc7ConfirmOneResult(row,await v9CheckStatus(row));}catch(e){}
+      }));
+    }
     await v9RefreshUi();
-  }finally{rc7ProofBusy=false}
+  }finally{rc7ProofBusy=false;}
 }
-setInterval(()=>{rc7ProductionProofTick().catch(()=>{})},4000);
+setInterval(()=>{rc7ProductionProofTick().catch(()=>{})},3500);
 async function v9CheckOnly(id){
   if(v9WorkerBusy){showStatus("formStatus","Queue is syncing. Wait a moment and check again.","info");return}
   if(!sessionVerified){showStatus("formStatus","Login online first. No request was sent.","err");return}
