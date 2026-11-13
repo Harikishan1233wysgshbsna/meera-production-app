@@ -2425,14 +2425,13 @@ async function v9Process(row){
     row=await v9Change(row.requestId,{state:"SENDING",attempts:(row.attempts||0)+1,
       lastPostedAt:Date.now(),nextCheckAt:0,lastError:"Transmission attempted. Save not yet confirmed."});
     await v9PostOnce(row);
-    // Keep the device queue ordered. GET can complete after the POST has
-    // reached the sheet, but we never infer success from the no-cors response.
-    for(let attempt=0;attempt<2;attempt++){
-      if(!sessionVerified||v9Owner()!==row.owner)break;
-      await new Promise(resolve=>setTimeout(resolve,attempt===0?1000:1700));
-      const status=await v9CheckStatus(row);
-      if(await v9ApplyStatus(row,status))return;
-      row=await v9Get(row.requestId);
+    // RC6: transmit and verify are separate lanes. This row has already been
+    // POSTed once; never resend just because the no-cors response is opaque.
+    // A different Request ID can transmit without waiting for this row's status.
+    const afterPost=await v9Get(row.requestId);
+    if(afterPost&&afterPost.state==="SENDING"){
+      await v9Change(row.requestId,{state:"PENDING",nextCheckAt:Date.now()+V9_RETRY_GRACE_MS,
+        lastError:"Sent to server; waiting for independent Request ID verification."});
     }
   }catch(e){
     await v9Change(row.requestId,{state:"PENDING",nextCheckAt:Date.now()+V9_RECHECK_MS,
@@ -2454,7 +2453,9 @@ async function v9Work(){
       // RC6: send at most two distinct Request IDs concurrently. All entries remain
       // durable in IndexedDB, backend atomic locking + request IDs prevent double writes.
       // Never select REVIEW_REQUIRED items, and never send the same entry twice in a batch.
-      const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" && (r.nextCheckAt||0)<=Date.now());
+      // Prioritize never-sent entries. Verification is handled independently;
+      // no unconfirmed POST can block the next fresh box.
+      const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" && !r.attempts);
       if(!eligible.length)break;
       const batch=eligible.slice(0,RC6_PARALLEL_SENDS);
       await Promise.allSettled(batch.map(row=>v9Process(row)));
