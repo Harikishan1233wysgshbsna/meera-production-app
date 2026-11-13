@@ -784,6 +784,20 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
         <button id="loginButton" type="submit" class="btn btn-primary">🔐 Login</button>
       </div>
     </form>
+<script id="meera-login-no-native-submit">
+/* Prevent silent page reload / disappearing credentials when app startup has failed. */
+(function(){
+  document.addEventListener('submit',function(event){
+    if(!event.target || event.target.id!=='loginForm')return;
+    event.preventDefault();
+    if(!window.__meeraLoginHandlerReady){
+      var status=document.getElementById('loginStatus');
+      if(status){status.textContent='App Login script failed to start. Check Browser Console (F12) and reload without clearing saved data.';status.className='status show err';}
+    }
+  },true);
+})();
+</script>
+
     <div id="quickOpenRow" class="login-actions hidden" style="margin-top:10px">
       <button id="quickOpenButton" type="button" class="btn btn-secondary" style="width:100%">⚡ Quick Open Last Session</button>
     </div>
@@ -2887,7 +2901,7 @@ document.addEventListener("DOMContentLoaded",async()=>{
   $("date").value=localISODate();applyAutoShift(true);buildMachineChecklist();
   document.getElementById("v1022AdminHistory")?.addEventListener("click",v1022LoadAdminHistory);
   document.getElementById("v1027OpenEntry")?.addEventListener("click",()=>showView("entry"));
-  $("loginForm").addEventListener("submit",login);$("quickOpenButton").addEventListener("click",quickOpenSavedSession);$("historyToggle").addEventListener("click",toggleHistory);$("logoutButton").addEventListener("click",logout);
+  $("loginForm").addEventListener("submit",login);window.__meeraLoginHandlerReady=true;$("quickOpenButton").addEventListener("click",quickOpenSavedSession);$("historyToggle").addEventListener("click",toggleHistory);$("logoutButton").addEventListener("click",logout);
   $("entryForm").addEventListener("submit",saveEntry);v9SetButton();v9ObserveQueuePanel();
   $("v9SyncNow").addEventListener("click",()=>v9Schedule(20));
   $("v9Export").addEventListener("click",()=>v9Export().catch(e=>showStatus("formStatus",e.message,"err")));
