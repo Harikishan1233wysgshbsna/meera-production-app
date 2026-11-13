@@ -2466,6 +2466,31 @@ async function v9Work(){
     await v9Release(owner);await v9RefreshUi();v9Schedule(3000);
   }
 }
+// RC6 test: independent read-only confirmation lane for requests already sent.
+// It never posts a new entry, and only marks SAVED on an exact server CONFIRMED.
+// A single rotating check avoids exhausting Google Apps Script with 200 polls.
+let rc6ConfirmBusy=false,rc6ConfirmCursor=0;
+async function rc6ConfirmOne(){
+  if(rc6ConfirmBusy||!v9StorageReady||!v9Db||!currentUser||!sessionVerified||document.hidden)return;
+  rc6ConfirmBusy=true;
+  try{
+    const owner=v9Owner(),rows=await v9GetAll(owner);
+    const awaiting=rows.filter(r=>r.attempts>0&&r.state!=="REVIEW_REQUIRED"&&v9IsActive(r));
+    if(!awaiting.length)return;
+    const row=awaiting[rc6ConfirmCursor++%awaiting.length];
+    const status=await v9CheckStatus(row);
+    if(status!=="CONFIRMED")return;
+    // Another tab may have completed this entry in the meantime.
+    const fresh=await v9Get(row.requestId);
+    if(!fresh||fresh.owner!==owner||!v9IsActive(fresh)||!fresh.attempts)return;
+    await v9ApplyStatus(fresh,status);
+    await v9RefreshUi();
+  }catch(e){
+    // Transport failure is not a negative save verdict; leave local payload intact.
+    v9LastStatus="Independent confirmation pending: "+String(e&&e.message||e).slice(0,100);
+  }finally{rc6ConfirmBusy=false;}
+}
+setInterval(()=>{rc6ConfirmOne().catch(()=>{})},6500);
 async function v9CheckOnly(id){
   if(v9WorkerBusy){showStatus("formStatus","Queue is syncing. Wait a moment and check again.","info");return}
   if(!sessionVerified){showStatus("formStatus","Login online first. No request was sent.","err");return}
