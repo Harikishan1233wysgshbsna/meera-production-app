@@ -1,0 +1,21 @@
+RC7 LIVE DIRECT SAVE — INSTALLATION GUIDE
+
+1. KEEP the old PRODUCTION BACKUP sheet and all old pending entries. DO NOT DELETE.
+2. Back up the Apps Script project and production spreadsheet, and record deployment Version 109 for rollback.
+3. Add a new Apps Script file named RC7_DirectSave.gs with the complete code in this folder.
+4. In the EXISTING Production Data Sync.gs, replace ONLY these two dispatch statements:
+    * GET route near start of routeGet_(p): return saveEntry_(body);
+      CHANGE TO: return meeraRC7DirectSave_(body);
+    * POST routePost_(body) 'saveEntry' case: return saveEntry_(body);
+      CHANGE TO: return meeraRC7DirectSave_(body);
+5. In the EXISTING routeGet_(p) switch change the checkSaveStatus case to:
+      case 'checkSaveStatus':
+        return meeraRC7DirectStatus_(p);
+   Keep the existing rc6ProductionProof route unchanged.
+6. Search project-wide for function meeraRC7DirectSave_ and function meeraRC7DirectStatus_; each should have exactly one definition.
+7. SAVE then deploy a NEW VERSION of the SAME deployment (same /exec URL). Re-test with an authorized entry using its Request ID.
+8. The existing LIVE GitHub index.html still sends action=saveEntry, so these route changes activate Direct Save without a frontend endpoint change.
+9. DANGER: Apps Script GET action=saveEntry already exists for legacy compatibility. Do not expose API tokens or use unauthenticated endpoints.
+10. On issues: revert same deployment to Version 109 and leave IndexedDB data untouched. Reconcile pending Request IDs before any retries.
+
+Current LIVE GitHub index.html uses rc6ProductionProof to remove Production-verified entries from upload pending while preserving original local payload. When RC7 DirectStatus is deployed, full confirmation will no longer depend on Backup.
