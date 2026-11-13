@@ -1430,10 +1430,13 @@ async function login(event){
     // One-request login removes the extra challenge round trip. The proof is
     // valid only for a short time and the password itself is never sent.
     let result=await apiGet("fastLogin",{username,proof:await sha256(verifier+":"+timeSlot),timeSlot});
-    // Compatibility fallback if the currently deployed script is older.
-    if(!result||result.error==="Unknown request."){
+    // The 30-second fast proof can fail when a PC clock is out of sync.
+    // Retry via server-issued challenge once; this never skips credential checks.
+    if(!result||!result.ok||!result.token){
       const challenge=await apiGet("challenge",{username});
-      if(!challenge||!challenge.challengeId||!challenge.nonce)throw new Error("Shared login backend is not connected. Deploy the supplied Apps Script and put its /exec URL in API.");
+      if(!challenge||!challenge.challengeId||!challenge.nonce){
+        throw new Error(result&&result.error&&result.error!=="Unknown request."?result.error:"Shared login backend is not connected.");
+      }
       result=await apiGet("login",{username,challengeId:challenge.challengeId,proof:await sha256(verifier+challenge.nonce)});
     }
     if(!result||!result.ok||!result.token)throw new Error(result&&result.error?result.error:"Invalid username or password.");
