@@ -131,6 +131,8 @@ function routeGet_(p) {
       return { ok: true, rows: String(requireSession_(p.token).role).toLowerCase() === 'admin' ? getEntries_(requireSession_(p.token)) : meeraV102UnitTodayEntries_(requireSession_(p.token)) };
     case 'unitTodayEntries':
       return { ok: true, dashboardVersion: 'V102.4', rows: meeraV102UnitTodayEntries_(requireSession_(p.token)) };
+    case 'myDuplicateBoxesToday':
+      return meeraRC5MyDuplicateBoxesToday_(requireSession_(p.token));
     case 'conningSources':
       return { ok: true, rows: getConningSources_(requireSession_(p.token)) };
     case 'materialIssues':
@@ -3530,4 +3532,39 @@ function meeraV101Diagnostic() {
     backupFirst:true, status:'READ_ONLY', note:'No full production scan in interactive save paths; scheduled reconciliation remains separate.'};
   console.log(JSON.stringify(result));
   return result;
+}
+
+/**
+ * RC5 user dashboard: count today's production rows explicitly flagged DUPLICATE.
+ * Read-only, scoped to the authenticated user's own production rows.
+ * Separate from browser-local Duplicate audit. Uses the entry DATE in column A.
+ */
+function meeraRC5MyDuplicateBoxesToday_(user) {
+  const sh = getSpreadsheet_().getSheetByName(CONFIG.ENTRY_SHEET_NAME);
+  if (!sh) throw new Error('PRODUCTION DATA missing');
+  const username = String(user.username || '').trim().toLowerCase();
+  const today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  if (!username) throw new Error('Authenticated username missing');
+  const last = sh.getLastRow();
+  if (last < 2) return {ok:true, date:today, count:0, boxes:[], complete:true};
+  let end = last, scanned = 0, count = 0, boxes = [];
+  const maxRows = 5000, batchSize = 250;
+  while (end >= 2 && scanned < maxRows) {
+    const n = Math.min(batchSize, end - 1, maxRows - scanned);
+    const first = end - n + 1;
+    // Read only date, box, status and owner. Never scan payload or secret columns.
+    const ab = sh.getRange(first, 1, n, 2).getDisplayValues();
+    const statuses = sh.getRange(first, 13, n, 1).getDisplayValues();
+    const owners = sh.getRange(first, 15, n, 1).getDisplayValues();
+    for (let i = 0; i < n; i++) {
+      if (meeraV102DateKey_(ab[i][0]) !== today) continue;
+      if (String(statuses[i][0] || '').trim().toUpperCase() !== 'DUPLICATE') continue;
+      if (String(owners[i][0] || '').trim().toLowerCase() !== username) continue;
+      count++;
+      if (boxes.length < 30) boxes.push(String(ab[i][1] || ''));
+    }
+    scanned += n;
+    end = first - 1;
+  }
+  return {ok:true, date:today, count:count, boxes:boxes, complete:end<2};
 }
