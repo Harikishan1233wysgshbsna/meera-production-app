@@ -2466,31 +2466,45 @@ async function v9Work(){
     await v9Release(owner);await v9RefreshUi();v9Schedule(3000);
   }
 }
-// RC6 test: independent read-only confirmation lane for requests already sent.
-// It never posts a new entry, and only marks SAVED on an exact server CONFIRMED.
-// A single rotating check avoids exhausting Google Apps Script with 200 polls.
-let rc6ConfirmBusy=false,rc6ConfirmCursor=0;
+// RC6 test: independent exact Request-ID confirmation lane.
+// A maximum of two concurrent status requests, never a second POST.
+// Confirmed server status is the ONLY way to retire local data.
+let rc6ConfirmBusy=false,rc6ConfirmCursor=0,rc6ConfirmLast=new Map();
 async function rc6ConfirmOne(){
   if(rc6ConfirmBusy||!v9StorageReady||!v9Db||!currentUser||!sessionVerified||document.hidden)return;
   rc6ConfirmBusy=true;
   try{
     const owner=v9Owner(),rows=await v9GetAll(owner);
+    const now=Date.now();
     const awaiting=rows.filter(r=>r.attempts>0&&r.state!=="REVIEW_REQUIRED"&&v9IsActive(r));
     if(!awaiting.length)return;
-    const row=awaiting[rc6ConfirmCursor++%awaiting.length];
-    const status=await v9CheckStatus(row);
-    if(status!=="CONFIRMED")return;
-    // Another tab may have completed this entry in the meantime.
-    const fresh=await v9Get(row.requestId);
-    if(!fresh||fresh.owner!==owner||!v9IsActive(fresh)||!fresh.attempts)return;
-    await v9ApplyStatus(fresh,status);
+    const eligible=awaiting.filter(r=>now-(rc6ConfirmLast.get(r.requestId)||0)>=12000);
+    if(!eligible.length)return;
+    const pair=eligible.slice(rc6ConfirmCursor%eligible.length).concat(eligible.slice(0,rc6ConfirmCursor%eligible.length)).slice(0,2);
+    rc6ConfirmCursor=(rc6ConfirmCursor+pair.length)%Math.max(1,eligible.length);
+    await Promise.allSettled(pair.map(async row=>{
+      rc6ConfirmLast.set(row.requestId,Date.now());
+      try{
+        const status=await v9CheckStatus(row);
+        if(status!=="CONFIRMED")return;
+        const fresh=await v9Get(row.requestId);
+        if(!fresh||fresh.owner!==owner||!v9IsActive(fresh)||!fresh.attempts)return;
+        await v9ApplyStatus(fresh,status);
+        rc6ConfirmLast.delete(row.requestId);
+      }catch(e){
+        // A timeout never means NOT_FOUND or safe-to-repost.
+        v9LastStatus="Confirmation retry pending: "+String(e&&e.message||e).slice(0,100);
+      }
+    }));
     await v9RefreshUi();
-  }catch(e){
-    // Transport failure is not a negative save verdict; leave local payload intact.
-    v9LastStatus="Independent confirmation pending: "+String(e&&e.message||e).slice(0,100);
+    // Release stale throttle metadata; it is not part of the durable queue.
+    if(rc6ConfirmLast.size>300){
+      const activeSet=new Set(awaiting.map(r=>r.requestId));
+      for(const key of rc6ConfirmLast.keys())if(!activeSet.has(key))rc6ConfirmLast.delete(key);
+    }
   }finally{rc6ConfirmBusy=false;}
 }
-setInterval(()=>{rc6ConfirmOne().catch(()=>{})},6500);
+setInterval(()=>{rc6ConfirmOne().catch(()=>{})},4000);
 async function v9CheckOnly(id){
   if(v9WorkerBusy){showStatus("formStatus","Queue is syncing. Wait a moment and check again.","info");return}
   if(!sessionVerified){showStatus("formStatus","Login online first. No request was sent.","err");return}
