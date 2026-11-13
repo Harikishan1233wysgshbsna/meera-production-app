@@ -116,6 +116,8 @@ function routeGet_(p) {
   if (!action) return getMasterData_();
 
   switch (action) {
+    case 'rc6ProductionProof':
+      return meeraRC6ProductionProof_(p);
     case 'fastLogin':
       return fastLogin_(String(p.username || ''), String(p.timeSlot || ''), String(p.proof || ''));
     case 'challenge':
@@ -1637,6 +1639,42 @@ function meeraSaveEntryWithUser_(body, user) {
 
 /* PRODUCTION DATA is the authority. If the row exists the answer is CONFIRMED,
    and a backup flag left PENDING by an interrupted save repairs itself. */
+/**
+ * RC6 read-only proof: does not wait for BACKUP CONFIRMED, does not repair it,
+ * and never mutates PRODUCTION DATA. One exact Request ID lookup in col Q.
+ * Return PRODUCTION_SAVED only for a unique, owner+machine+box matching row.
+ */
+function meeraRC6ProductionProof_(p) {
+  const user=requireSession_(p.token);
+  const id=String(p.requestId||'').trim();
+  const box=String(p.box||'').trim().toUpperCase();
+  const machine=Number(p.machine);
+  if(!/^[A-Za-z0-9-]{16,100}$/.test(id) || !box || !validMachine_(machine))
+    throw new Error('Valid Request ID, box and machine required.');
+  if(String(user.role||'').toLowerCase()!=='admin' &&
+     (user.machines||[]).map(Number).indexOf(machine)<0)
+    throw new Error('Machine not assigned.');
+  const sheet=getSpreadsheet_().getSheetByName(CONFIG.ENTRY_SHEET_NAME);
+  if(!sheet)throw new Error('Production sheet missing.');
+  const end=sheet.getLastRow();
+  if(end<2)return {ok:true,status:'NOT_FOUND',requestId:id,box:box};
+  // Search identity, NOT only Box: a second operator may have reused the Box.
+  const matches=sheet.getRange(2,17,end-1,1).createTextFinder(id)
+    .matchEntireCell(true).matchCase(true).findAll();
+  if(matches.length===0)return {ok:true,status:'NOT_FOUND',requestId:id,box:box};
+  if(matches.length!==1)return {ok:true,status:'REVIEW_REQUIRED',requestId:id,box:box};
+  const rowNo=matches[0].getRow();
+  const row=sheet.getRange(rowNo,1,1,17).getDisplayValues()[0];
+  const storedBox=String(row[1]||'').trim().toUpperCase(); // column B
+  const storedMachine=Number(row[2]); // column C
+  const storedOwner=String(row[14]||'').trim().toLowerCase(); // column O
+  if(String(row[16]||'').trim()!==id || storedBox!==box || storedMachine!==machine ||
+     storedOwner!==String(user.username||'').trim().toLowerCase())
+    return {ok:true,status:'REVIEW_REQUIRED',requestId:id,box:box};
+  return {ok:true,status:'PRODUCTION_SAVED',requestId:id,box:box,
+    machine:machine,row:rowNo,backupStatus:'NOT_VERIFIED'};
+}
+
 function checkSaveStatus_(p) {
   const user = requireSession_(p.token);
   const requestId = String(p.requestId || '').trim();
