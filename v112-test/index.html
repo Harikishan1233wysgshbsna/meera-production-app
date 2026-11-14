@@ -2429,7 +2429,7 @@ async function v9Process(row){
       }
     }
     const next=await v9ChangeIfState(id,["QUEUED","PENDING","SENDING"],{
-      state:"SENDING",retryAuthorized:false,attempts:(row.attempts||0)+1,
+      state:"SENDING",retryAuthorized:false,notFoundProofs:0,attempts:(row.attempts||0)+1,
       lastPostedAt:Date.now(),nextCheckAt:0,
       lastError:"Entry sent; awaiting exact Production confirmation."});
     if(!next)return;
@@ -2453,13 +2453,14 @@ async function v9Work(){
     for(let i=0;i<30;i++){
       if(!sessionVerified||v9Owner()!==owner)break;
       const records=await v9GetAll(owner),active=records.filter(v9IsActive);
-      // Two distinct POSTs at a time. All other sent entries are independently
-      // verified in batches; no "waiting five minutes per box" bottleneck.
+      // V112.1: only ONE production POST at a time, preserving the local
+      // sequence of submissions. New forms continue queuing in IndexedDB.
+      // Batch verification is independent and never blocks the entry form.
       const eligible=active.filter(r=>r.state!=="REVIEW_REQUIRED" &&
         (r.nextCheckAt||0)<=Date.now() &&
         (!(r.attempts||0)||r.retryAuthorized===true));
       if(!eligible.length)break;
-      await Promise.allSettled(eligible.slice(0,2).map(r=>v9Process(r)));
+      await Promise.allSettled(eligible.slice(0,1).map(r=>v9Process(r)));
       await v9RefreshUi();
     }
   }finally{
@@ -2481,13 +2482,23 @@ async function rc7ConfirmOneResult(row,status){
     const fresh=await v9Get(row.requestId);
     if(!fresh||!v9IsActive(fresh)||fresh.state==="REVIEW_REQUIRED"||
        fresh.retryAuthorized===true)return;
+    // A single negative status may race an in-flight Google Sheets append.
+    // Require at least TWO separate batch checks before authorising retry.
+    const misses=Number(fresh.notFoundProofs)||0;
+    if(misses<1){
+      await v9ChangeIfState(row.requestId,["SENDING","PENDING"],{
+        notFoundProofs:1,retryAuthorized:false,
+        lastError:"Checking Production Request ID again before safe retry."
+      });
+      return;
+    }
     if(fresh.attempts>=V9_MAX_POST_ATTEMPTS){
       await v9ChangeIfState(row.requestId,["SENDING","PENDING"],{state:"REVIEW_REQUIRED",
         retryAuthorized:false,lastError:"Server did not confirm after maximum retries. Preserve payload; admin review."});
     }else{
       await v9ChangeIfState(row.requestId,["SENDING","PENDING"],{state:"PENDING",
         retryAuthorized:true,nextCheckAt:Date.now(),
-        lastError:"Server says NOT_FOUND after grace. Same Request ID retry queued."});
+        lastError:"Two server checks returned NOT_FOUND. Checking once more before same-ID retry."});
       v9Schedule(0);
     }
   }else if(status==="REVIEW_REQUIRED"&&row.lastPostedAt&&
@@ -2691,7 +2702,6 @@ async function saveEntry(event){
     if (!v9StorageReady) throw new Error("IndexedDB backup is not ready. No request sent.");
     // Stop box duplicates on the FORM before the payload enters local queue.
     // Same-unit cross-device uniqueness still requires a server-side atomic allocator.
-    const oldRows=await v9GetAll(v9Owner());
     // V112: never block a NEW Request ID solely because the Box was used before.
     // The server writes each new request and marks DUPLICATE only when the
     // same Box exists on the same production date.
