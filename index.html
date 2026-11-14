@@ -2529,7 +2529,7 @@ async function rc7ProductionProofTick(){
       await Promise.allSettled(selected.map(async row=>{
         const v=byId.get(row.requestId);
         if(!v||String(v.box||"").toUpperCase()!==row.box ||
-           (v.status==="CONFIRMED"&&Number(v.machine)!==Number(row.payload.machine)))return;
+           false /* V112: identity proof is Request ID + Box; no machine comparison */)return;
         await rc7ConfirmOneResult(row,String(v.status).toUpperCase());
       }));
     }else{
@@ -2690,16 +2690,9 @@ async function saveEntry(event){
     // Stop box duplicates on the FORM before the payload enters local queue.
     // Same-unit cross-device uniqueness still requires a server-side atomic allocator.
     const oldRows=await v9GetAll(v9Owner());
-    if(oldRows.some(r=>String(r.box||'').toUpperCase()===finalBox)){
-      $("box").value=Math.max(Number(digits)+1,getNextBox(unitForMachine(machine)));
-      updateBoxPreview();
-      throw new Error("BOX ALREADY USED on this phone: "+finalBox+". Next automatic box selected; check details and tap Save again.");
-    }
-    if(entries.some(r=>String(r.box||r.boxNumber||'').toUpperCase()===finalBox)){
-      $("box").value=Math.max(Number(digits)+1,getNextBox(unitForMachine(machine)));
-      updateBoxPreview();
-      throw new Error("BOX ALREADY EXISTS in loaded LIVE data: "+finalBox+". Next automatic box selected; check details and tap Save again.");
-    }
+    // V112: never block a NEW Request ID solely because the Box was used before.
+    // The server writes each new request and marks DUPLICATE only when the
+    // same Box exists on the same production date.
     await v9Insert(entry); // Wait for the durable transaction to finish.
     const stored = await v9Get(requestId);
     if(!stored || stored.requestId!==requestId || stored.box!==finalBox)
