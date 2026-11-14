@@ -1,0 +1,40 @@
+--- a/Production Data Sync.gs
++++ b/Production Data Sync.gs
+@@ -195,6 +195,7 @@
+ 
+ function routePost_(body) {
+   const action = String(body.action || '').trim();
++  if (['nativeMe','nativeRpc','nativeAuthorize','nativeBatch'].indexOf(action)>=0) return rc5NativeRoute_(body);
+   switch (action) {
+     case 'saveEntry':
+       return saveEntry_(body);
+@@ -3026,6 +3027,7 @@
+   for (let i = 0; i < values.length; i++) {
+     if (Date.now() - started > budgetMs || summary.scanned >= maxRows) break;
+     const status = String(values[i][6]||'').trim().toUpperCase();
++    if (status === 'REVIEW_REQUIRED') continue;
+     const requestId = String(values[i][0]||'').trim();
+     if (!requestId) continue;
+     if (status === 'CONFIRMED' && (prod.byId[requestId]||[]).length === 1) continue;
+@@ -3033,6 +3035,7 @@
+     const box = cleanBox_(values[i][2]).toUpperCase();
+     try {
+       if (meeraIsTombstoned_(ss,'PRODUCTION DATA',requestId,box)) {
++        backup.getRange(i+2,7).setValue('REVIEW_REQUIRED');
+         summary.review++; summary.details.push({ requestId, box, result:'TOMBSTONED' }); continue;
+       }
+       // Different Request IDs may share the same Box. Only conflicting
+@@ -3061,8 +3064,13 @@
+       }
+       const owner = findUser_(String(values[i][5]||''));
+       if (!owner || !owner.active) {
++        backup.getRange(i+2,7).setValue('REVIEW_REQUIRED');
+         summary.review++; summary.details.push({ requestId, box, result:'OWNER_INACTIVE' }); continue;
+       }
++      if (String(owner.role).toLowerCase() !== 'admin' && (owner.machines||[]).map(Number).indexOf(Number(data.machine))<0) {
++        backup.getRange(i+2,7).setValue('REVIEW_REQUIRED');
++        summary.review++; summary.details.push({requestId,box,result:'MACHINE_DENIED'}); continue;
++      }
+       // The save engine takes its own lock, so none is held here.
+       const result = meeraSaveEntryWithUser_(data, owner);
+       const state = String(result.status||'').toUpperCase();

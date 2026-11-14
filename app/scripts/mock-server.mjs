@@ -1,0 +1,3 @@
+import http from 'node:http';import {MockCloud} from '../web/mock-cloud.js';
+const cloud=new MockCloud();const port=Number(process.env.PORT||8787);
+http.createServer(async(req,res)=>{let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>1000000){res.writeHead(413).end();return;}}try{const body=JSON.parse(raw||'{}');let result;if(body.action==='nativeBatch')result=await cloud.batch(body.owner,body.entries||[]);else if(body.action==='work'){cloud.work();result={ok:true};}else result={ok:false,errorCode:'UNKNOWN_ACTION'};res.setHeader('Content-Type','application/json');res.end(JSON.stringify(result));}catch{res.writeHead(400).end('{}');}}).listen(port,'127.0.0.1',()=>console.log(`Isolated mock API http://127.0.0.1:${port}; no LIVE requests`));

@@ -1,0 +1,13 @@
+{
+  "repository": "Harikishan1233wysgshbsna/meera-production-app",
+  "path": "RC5 LIVE/index.html",
+  "commit": "aefb6cd00d63ef18eb049e843e77b0d77429affc",
+  "sha256": "19ea28a30ed10aae2370a3095fa36597d4bea41145f65298a4cbc17f872c5198",
+  "changes": [
+    "native secure session hook",
+    "native SQLite queue adapter",
+    "removed fixed-PIN export, AI local-clear helper and admin diagnostic shortcut; disabled legacy import",
+    "removed production endpoints and spreadsheet IDs",
+    "distinct Request IDs follow backend duplicate policy"
+  ]
+}
