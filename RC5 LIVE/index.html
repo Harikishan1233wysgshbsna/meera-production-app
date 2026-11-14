@@ -2219,7 +2219,7 @@ function v9ObserveQueuePanel(){
     check();
   }
 }
-function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
+function v9StatusLabel(state){return ({QUEUED:"Queued locally",SENDING:"Sending (not verified)",PENDING:"Pending verification",CLOUD_RECEIVED:"Received in cloud — Production pending",SAVED:"Verified saved",DUPLICATE:"Duplicate rejected",ON_SERVER:"Already in PRODUCTION DATA",REVIEW_REQUIRED:"Admin review"})[state]||"Needs attention"}
 function v9StatusClass(state){return state==="SAVED"?"ok":state==="DUPLICATE"||state==="REVIEW_REQUIRED"?"err":"info"}
 async function v9RefreshUi(){
   if(!currentUser||!v9Db)return;
@@ -2293,11 +2293,13 @@ async function v9CheckStatus(row){
   const state=String(data.status||"").trim().toUpperCase();
   if(state==="BACKUP_REPAIR_REQUIRED")return "REVIEW_REQUIRED";
   if(!["CONFIRMED","DUPLICATE_BOX","REVIEW_REQUIRED","PENDING","NOT_FOUND"].includes(state))throw new Error("Unexpected response: "+state);
-  if(state==="CONFIRMED"||state==="DUPLICATE_BOX"){
+  if(state==="CONFIRMED"||state==="DUPLICATE_BOX"||state==="PENDING"){
     if(String(data.requestId||"")!==row.requestId||String(data.box||"").toUpperCase()!==row.box)
       throw new Error("Confirmation identity mismatch; keep pending and ask admin");
   }
-  return state;
+  // In the matching RC5 backend PENDING means this Request ID has an
+  // authenticated server backup row, while Production is not yet confirmed.
+  return state==="PENDING"?"CLOUD_RECEIVED":state;
 }
 // Read-only server reconciliation for an old or manually completed box.
 // This endpoint performs an exact box lookup ONLY for an unresolved local item,
@@ -2343,6 +2345,11 @@ async function v9ResolveExistingBox(row){
   return false;
 }
 async function v9ApplyStatus(row,status){
+  if(status==="CLOUD_RECEIVED"){
+    await v9Change(row.requestId,{state:"CLOUD_RECEIVED",cloudReceivedAt:row.cloudReceivedAt||new Date().toISOString(),
+      nextCheckAt:Date.now()+V9_RECHECK_MS,lastError:"Server backup received. Production pending; full local copy retained."});
+    return true;
+  }
   if(status==="CONFIRMED"){
     // After verified server save, release the full mobile payload. Keep only
     // request-ID/box audit metadata; LIVE Production + Backup hold the entry.
@@ -2382,6 +2389,31 @@ async function v9PostOnce(row){
   }catch(e){ /* transport uncertainty is not a save failure */ }
   finally{clearTimeout(timer)}
 }
+function v9ClaimFirstSend(row){
+  // Claim once in the same database transaction across tabs and workers.
+  // A short reservation lets a fresh save bypass older status checks while
+  // keeping the normal worker from sending the same first attempt again.
+  return v9Transaction("entries","readwrite",(store,set)=>{
+    store.get(row.requestId).onsuccess=e=>{
+      const current=e.target.result;
+      if(!current||current.owner!==row.owner||!["QUEUED","PENDING"].includes(current.state)||current.attempts){set(null);return;}
+      const claimed={...current,state:"SENDING",attempts:1,lastPostedAt:Date.now(),
+        nextCheckAt:Date.now()+V9_RETRY_GRACE_MS,updatedAt:new Date().toISOString(),
+        lastError:"Local copy verified. Upload started; cloud receipt not yet verified."};
+      store.put(claimed);set(claimed);
+    };
+  });
+}
+async function v9StartImmediateHandoff(row){
+  // Called only after the full local entry is committed and read back.
+  // Use the existing deployed saveEntry endpoint; no undeployed cloud route.
+  try{await v9Process(row);}
+  catch(e){v9LastStatus="Local entry retained; cloud handoff will retry: "+String(e.message||e);}
+  finally{
+    v9Schedule(0);
+    v9RefreshUi().catch(()=>{});
+  }
+}
 async function v9Process(row){
   if(!sessionVerified||v9Owner()!==row.owner)return;
   try{
@@ -2396,8 +2428,14 @@ async function v9Process(row){
         await v9Change(row.requestId,{state:"REVIEW_REQUIRED",lastError:"Retry limit reached; manual admin verification required.",nextCheckAt:0});return;
       }
     }
-    row=await v9Change(row.requestId,{state:"SENDING",attempts:(row.attempts||0)+1,
-      lastPostedAt:Date.now(),nextCheckAt:0,lastError:"Transmission attempted. Save not yet confirmed."});
+    if(!row.attempts){
+      row=await v9ClaimFirstSend(row);
+      if(!row)return; // Another tab or the immediate handoff already claimed it.
+    }else{
+      row=await v9Change(row.requestId,{state:"SENDING",attempts:(row.attempts||0)+1,
+        lastPostedAt:Date.now(),nextCheckAt:Date.now()+V9_RETRY_GRACE_MS,lastError:"Transmission attempted. Save not yet confirmed."});
+    }
+    if(!sessionVerified||v9Owner()!==row.owner)return;
     await v9PostOnce(row);
     // Keep the device queue ordered. GET can complete after the POST has
     // reached the sheet, but we never infer success from the no-cors response.
@@ -2580,6 +2618,7 @@ async function saveEntry(event){
     state:"QUEUED", attempts:0, lastPostedAt:0, nextCheckAt:0,
     lastError:"", updatedAt:new Date().toISOString()
   };
+  let localCommitted=false;
   v9LocalBusy=true; v9SetButton();
   try {
     if (!v9StorageReady) throw new Error("IndexedDB backup is not ready. No request sent.");
@@ -2600,16 +2639,22 @@ async function saveEntry(event){
     const stored = await v9Get(requestId);
     if(!stored || stored.requestId!==requestId || stored.box!==finalBox)
       throw new Error("Local verification failed. The form has NOT been cleared.");
+    localCommitted=true;
+    // Start now, before form rendering and queue refresh, without waiting
+    // for old pending entries. Failure never removes the local payload.
+    void v9StartImmediateHandoff(stored);
     v9KnownBoxes.add(finalBox);
     v9PrepareNextForm(finalBox);
-    showStatus("formStatus","✓ QUEUED LOCALLY: "+finalBox+". NOT YET SAVED to Google Sheet. You can enter next box.","info");
+    showStatus("formStatus","✓ SAVED ON PHONE: "+finalBox+". Cloud upload started; receipt not yet verified. You can enter next box.","info");
     await v9RefreshUi();
     v9Schedule(50);
     // Optional admin inbox report is never on the critical path of local Save.
     // Disabled automatically until authenticated monitor backend is deployed.
     if(window.meeraMonitorQueueReport)window.meeraMonitorQueueReport(entry);
   } catch(error) {
-    showStatus("formStatus","NOT QUEUED — "+(error.message||"Storage failed")+". Keep these form details; do not re-enter blindly.","err");
+    showStatus("formStatus",localCommitted?
+      "SAVED ON PHONE: "+finalBox+". Display/update failed; do not enter this box again. Cloud verification will retry.":
+      "NOT QUEUED — "+(error.message||"Storage failed")+". Keep these form details; do not re-enter blindly.","err");
   } finally {v9LocalBusy=false;v9SetButton();}
 }
 /* -------- Shared admin user management -------- */
@@ -3748,3 +3793,4 @@ document.addEventListener('click',function(e){if(e.target?.closest?.('[data-view
 </script>
 </body>
 </html>
+
