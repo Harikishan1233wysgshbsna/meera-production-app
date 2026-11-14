@@ -1,0 +1,5 @@
+node_modules/
+private/
+*.private.json
+*.private.html
+.env*

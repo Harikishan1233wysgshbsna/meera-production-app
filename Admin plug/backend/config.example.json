@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {"key":"conning","type":"conning","title":"Movement • Conning output","spreadsheetId":"SET_MOVEMENT_ID_PRIVATELY","sheetName":"CONNING PRO.","headerRow":2,"dataStart":3,"dateColumn":2,"columns":16},
+    {"key":"covering","type":"covering","title":"Movement • Covering stage","spreadsheetId":"SET_MOVEMENT_ID_PRIVATELY","sheetName":"7. Covering Prod.","headerRow":1,"dataStart":2,"dateColumn":2,"columns":32},
+    {"key":"production","type":"production","title":"RC5 • Entered records","spreadsheetId":"SET_PRODUCTION_ID_PRIVATELY","sheetName":"PRODUCTION DATA","headerRow":1,"dataStart":2,"dateColumn":1,"columns":17},
+    {"key":"backup","type":"backup","title":"RC5 • Server-backed queue","spreadsheetId":"SET_PRODUCTION_ID_PRIVATELY","sheetName":"PRODUCTION BACKUP","headerRow":1,"dataStart":2,"dateColumn":2,"columns":10},
+    {"key":"orders","type":"orders","title":"Joshi orders • confirm actual workbook first","spreadsheetId":"SET_CONFIRMED_ORDER_WORKBOOK_ID_PRIVATELY","sheetName":"ORDER","headerRow":1,"dataStart":2,"dateColumn":1,"columns":17,"orderSourceConfirmed":false}
+  ],
+  "whatsappDocId":null,
+  "controlSpreadsheetId":null
+}

@@ -1,0 +1,22 @@
+--- a/Production Data Sync.gs
++++ b/Production Data Sync.gs
+@@ -84,6 +84,11 @@
+ 
+ function routeGet_(p) {
+   const action = String(p.action || '').trim();
++  if(action==='adminPlugMeta') return adminPlugMeta_(p);
++  if(action==='adminPlugPage') return adminPlugPage_(p);
++  if(action==='adminPlugChat') return adminPlugChat_(p);
++  if(action==='adminPlugAnnotations') return adminPlugAnnotations_(p);
++  if(action==='adminPlugChange') return adminPlugChange_(p);
+ 
+   // VERIFIED SAVE: the same save is reachable over GET so the browser can
+   // read a real JSON verdict through JSONP when a CORS POST is blocked.
+@@ -195,6 +200,7 @@
+ 
+ function routePost_(body) {
+   const action = String(body.action || '').trim();
++  if(action==='adminPlugAnnotate') return adminPlugAnnotate_(body);
+   switch (action) {
+     case 'saveEntry':
+       return saveEntry_(body);

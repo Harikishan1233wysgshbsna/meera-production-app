@@ -1,0 +1,1 @@
+{"name":"meera-admin-plug","version":"0.1.0","type":"module","private":true,"scripts":{"build":"node scripts/build.mjs","test":"node --test tests/*.test.mjs"},"dependencies":{"read-excel-file":"^6.0.1"},"devDependencies":{"esbuild":"^0.25.0","happy-dom":"^20.0.0"}}
