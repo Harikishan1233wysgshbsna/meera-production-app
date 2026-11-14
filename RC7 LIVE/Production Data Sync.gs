@@ -4070,7 +4070,7 @@ function meeraRC7DirectSave_(body) {
     if (meeraFastTombstone_(ss,requestId,box))
       throw new Error('Record deleted by Admin. Do not retry automatically.');
     // The global search protects old identities even if written before RC7.
-    const prod=meeraRC7ProductionIndex_(requestId,box);
+    const prod=meeraRC7ProductionIndex_(requestId,box,body.date);
     const exact=prod.byId[requestId]||[];
     if (exact.length>1)
       return {ok:false,status:'REVIEW_REQUIRED',requestId:requestId,box:box,
@@ -4078,9 +4078,8 @@ function meeraRC7DirectSave_(body) {
     if (exact.length===1) {
       const rowNo=exact[0];
       const old=prod.sheet.getRange(rowNo,1,1,prod.width).getDisplayValues()[0];
-      const machineIndex=findHeader_(prod.names,['m/c no','m/c','machine no','machine','mc no']);
-      if (prod.boxOf[rowNo]!==box || machineIndex<0 ||
-          Number(old[machineIndex])!==machine ||
+      // Identity is Request ID + Box. Authorization remains user-scoped.
+      if (prod.boxOf[rowNo]!==box ||
           String(old[MEERA_COL_ENTERED_]||'').trim().toLowerCase()!==String(user.username||'').toLowerCase())
         return {ok:false,status:'REVIEW_REQUIRED',requestId:requestId,box:box,
           error:'Existing Request ID belongs to different owner, box or machine.'};
@@ -4121,24 +4120,36 @@ function meeraRC7DirectSave_(body) {
  * Old recovery/admin functions above remain available for old entries.
  * Never delete the backup spreadsheet during migration.
  * ==================================================================== */
-function meeraRC7ProductionIndex_(requestId, box) {
+// RC7 V112 CANDIDATE: normalise date, but do NOT mistake a Box on a different date for a duplicate.
+function meeraRC7ISODate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime()))
+    return Utilities.formatDate(value,Session.getScriptTimeZone(),'yyyy-MM-dd');
+  const s=String(value==null?'':value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const d=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if(d)return d[3]+'-'+d[2].padStart(2,'0')+'-'+d[1].padStart(2,'0');
+  return '';
+}
+function meeraRC7ProductionIndex_(requestId, box, entryDate) {
   const sheet=getSpreadsheet_().getSheetByName(CONFIG.ENTRY_SHEET_NAME);
   if (!sheet) throw new Error('Production sheet missing.');
   const width=Math.max(sheet.getLastColumn(),17);
   const headers=sheet.getRange(1,1,1,width).getDisplayValues()[0];
-  const required={1:'BOX NUMBER',2:'M/C NO',12:'STATUS',13:'UNIT',14:'ENTERED BY',15:'MONTH',16:'REQUEST ID'};
+  const required={0:'DATE',1:'BOX NUMBER',2:'M/C NO',12:'STATUS',13:'UNIT',14:'ENTERED BY',15:'MONTH',16:'REQUEST ID'};
   Object.keys(required).forEach(function(k){
     if(String(headers[Number(k)]||'').trim().toUpperCase()!==required[k])
       throw new Error('RC7 production header mismatch at column '+(Number(k)+1));
   });
   const names=headers.map(function(x){return String(x||'').trim().toLowerCase();});
   const byId={},byBox={},boxOf={};
-  // Search the historical Request ID globally before a write. Exact ID is the
-  // idempotency key; duplicate Box numbers can be saved and flagged for review.
+  // Keep Request ID GLOBAL for idempotency across dates.
   const ids=meeraRC5ExactIdentityRows_(sheet,17,requestId);
-  const boxes=meeraRC5ExactIdentityRows_(sheet,2,box);
+  const boxCandidates=meeraRC5ExactIdentityRows_(sheet,2,box);
   byId[requestId]=ids;
-  byBox[box]=boxes;
+  const date=meeraRC7ISODate_(entryDate);
+  byBox[box]=date?boxCandidates.filter(function(rowNo){
+    return meeraRC7ISODate_(sheet.getRange(rowNo,1).getValue())===date;
+  }):[];
   ids.forEach(function(n){
     boxOf[n]=cleanBox_(sheet.getRange(n,2).getDisplayValue()).toUpperCase();
   });
@@ -4150,29 +4161,24 @@ function meeraRC7RememberRow_(requestId,rowNumber) {
   catch(ignore){}
 }
 function meeraRC7VerifyRow_(sheet,rowNo,requestId,box,machine,username) {
-  if(!Number.isSafeInteger(rowNo)||rowNo<2||rowNo>sheet.getLastRow())
-    return null;
+  if(!Number.isSafeInteger(rowNo)||rowNo<2||rowNo>sheet.getLastRow())return null;
   const r=sheet.getRange(rowNo,1,1,17).getDisplayValues()[0];
+  // Only Request ID (Q) + Box (B) are the saved-entry identity proof.
   if(String(r[16]||'').trim()!==requestId)return null;
-  if(String(r[1]||'').trim().toUpperCase()!==box ||
-     Number(r[2])!==machine ||
-     String(r[14]||'').trim().toLowerCase()!==username) {
+  if(cleanBox_(r[1]).toUpperCase()!==box)
     return {ok:true,status:'REVIEW_REQUIRED',requestId:requestId,box:box};
-  }
+  // Authorization is separate from identity proof: do not confirm another operator's row.
+  if(String(r[14]||'').trim().toLowerCase()!==username)
+    return {ok:true,status:'REVIEW_REQUIRED',requestId:requestId,box:box};
   return {ok:true,status:'CONFIRMED',source:'PRODUCTION_DATA',
-    requestId:requestId,box:box,machine:machine,row:rowNo};
+    requestId:requestId,box:box,row:rowNo};
 }
 function meeraRC7StatusAuth_(p,user) {
   const requestId=String(p.requestId||'').trim(),
-        box=String(p.box||'').trim().toUpperCase(),
-        machine=Number(p.machine);
-  if(!/^[A-Za-z0-9-]{16,100}$/.test(requestId)||!box||!validMachine_(machine))
-    throw new Error('Valid Request ID, Box and Machine required.');
-  if(String(user.role||'').toLowerCase()!=='admin' &&
-     (user.machines||[]).map(Number).indexOf(machine)<0)
-    throw new Error('Machine not allowed for this user.');
-  return {requestId:requestId,box:box,machine:machine,
-    username:String(user.username||'').trim().toLowerCase()};
+        box=cleanBox_(p.box).toUpperCase();
+  if(!/^[A-Za-z0-9-]{16,100}$/.test(requestId)||!box)
+    throw new Error('Valid Request ID and Box required.');
+  return {requestId:requestId,box:box,username:String(user.username||'').trim().toLowerCase()};
 }
 function meeraRC7DirectStatus_(p) {
   const user=requireSession_(p.token),v=meeraRC7StatusAuth_(p,user);
